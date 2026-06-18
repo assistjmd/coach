@@ -42,6 +42,6 @@ You will need to add a `GoogleService-Info.plist` (for Google Sign-In) and confi
 1. Create `backend/app/providers/<slug>.py` implementing the `Provider` protocol from `providers/base.py`.
 2. Register it in `backend/app/providers/registry.py`.
 3. Add OAuth credentials to env: `<SLUG>_CLIENT_ID`, `<SLUG>_CLIENT_SECRET`.
-4. iOS Connections screen auto-renders new tiles from `GET /v1/providers`.
+4. iOS Connections screen auto-renders new tiles from the `providers` list in `GET /v1/me`.
 
 No core changes required.

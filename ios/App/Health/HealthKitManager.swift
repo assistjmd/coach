@@ -42,20 +42,20 @@ final class HealthKitManager: ObservableObject {
     private func enableBackgroundDelivery() async throws {
         for q in HealthKitTypes.quantityIdentifiers {
             guard let t = HKQuantityType.quantityType(forIdentifier: q) else { continue }
-            try await withCheckedThrowingContinuation { cont in
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                 store.enableBackgroundDelivery(for: t, frequency: .immediate) { ok, err in
                     if let err { cont.resume(throwing: err) } else { cont.resume() }
                 }
             }
         }
         if let sleep = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) {
-            try await withCheckedThrowingContinuation { cont in
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                 store.enableBackgroundDelivery(for: sleep, frequency: .hourly) { ok, err in
                     if let err { cont.resume(throwing: err) } else { cont.resume() }
                 }
             }
         }
-        try await withCheckedThrowingContinuation { cont in
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             store.enableBackgroundDelivery(for: HKWorkoutType.workoutType(), frequency: .immediate) { _, err in
                 if let err { cont.resume(throwing: err) } else { cont.resume() }
             }
