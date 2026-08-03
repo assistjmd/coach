@@ -31,6 +31,10 @@ targets:
         CFBundleDisplayName: Coach
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # GENERATE_INFOPLIST_FILE is NO and this block is written over
+        # App/Info.plist on every `xcodegen generate`, so every key must live
+        # here — editing the plist directly loses the change on regeneration.
+        LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIColorName: ""
         UISupportedInterfaceOrientations:

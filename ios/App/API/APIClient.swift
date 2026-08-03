@@ -25,10 +25,38 @@ final class APIClient {
         return URL(string: "http://localhost:8000")!
     }
 
+    /// Parsers tried in order for any `Date` field.
+    ///
+    /// `.iso8601` alone is not enough: it implies `.withInternetDateTime` only,
+    /// which *rejects* fractional seconds. FastAPI serialises `datetime` as
+    /// `2026-08-03T13:31:00.123456+00:00`, so a field like `lastSyncedAt` decodes
+    /// today only because it is still null — the first successful sync would
+    /// start failing the whole `/v1/me` response.
+    ///
+    /// Calendar dates (`target_date`) are deliberately NOT handled here. A race
+    /// day is a date, not an instant, and coercing one into a `Date` shifts it
+    /// across timezones — those fields are typed `String` at the call site.
+    private static let dateParsers: [(String) -> Date?] = {
+        let withFractional = ISO8601DateFormatter()
+        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return [withFractional.date(from:), plain.date(from:)]
+    }()
+
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.keyDecodingStrategy = .convertFromSnakeCase
-        d.dateDecodingStrategy = .iso8601
+        d.dateDecodingStrategy = .custom { decoder in
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            for parse in APIClient.dateParsers {
+                if let date = parse(raw) { return date }
+            }
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: decoder.codingPath,
+                      debugDescription: "unrecognised date: \(raw)")
+            )
+        }
         return d
     }()
     private let encoder: JSONEncoder = {

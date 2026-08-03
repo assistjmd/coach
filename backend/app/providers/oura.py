@@ -20,7 +20,13 @@ from typing import Any
 import httpx
 
 from app.config import settings
-from app.providers.base import NormalizedRecord, Provider, ProviderInfo, TokenSet
+from app.providers.base import (
+    NormalizedRecord,
+    Provider,
+    ProviderInfo,
+    TokenSet,
+    redirect_uri_for,
+)
 
 _AUTHORIZE_URL = "https://cloud.ouraring.com/oauth/authorize"
 _TOKEN_URL = "https://api.ouraring.com/oauth/token"
@@ -38,7 +44,7 @@ class OuraProvider:
             "client_id": cfg.oura_client_id,
             "response_type": "code",
             "scope": " ".join(_SCOPES),
-            "redirect_uri": cfg.oura_redirect_uri,
+            "redirect_uri": redirect_uri_for("oura"),
             "state": state,
         }
         return f"{_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
@@ -51,7 +57,7 @@ class OuraProvider:
                 data={
                     "grant_type": "authorization_code",
                     "code": code,
-                    "redirect_uri": cfg.oura_redirect_uri,
+                    "redirect_uri": redirect_uri_for("oura"),
                     "client_id": cfg.oura_client_id,
                     "client_secret": cfg.oura_client_secret,
                 },

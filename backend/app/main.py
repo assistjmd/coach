@@ -33,6 +33,11 @@ app.include_router(dashboard_routes.router)
 app.include_router(chat_routes.router)
 app.include_router(goal_routes.router)
 
+if settings().app_env == "dev":
+    from app.routes import dev as dev_routes
+
+    app.include_router(dev_routes.router)
+
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:

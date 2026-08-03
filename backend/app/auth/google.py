@@ -15,8 +15,13 @@ _request = google_requests.Request()
 def verify_id_token(token: str) -> dict[str, Any]:
     cfg = settings()
     audiences = [a for a in (cfg.google_client_id_ios, cfg.google_client_id_web) if a]
+    if not audiences and cfg.app_env != "dev":
+        # An unaudienced verify accepts any Google-issued ID token from any
+        # client — i.e. anyone with a Google account can mint a session for an
+        # arbitrary email. Tolerable in dev; never outside it.
+        raise ValueError("google sign-in is not configured")
     last_err: Exception | None = None
-    for aud in audiences or [None]:  # if no audiences configured, do unaudienced verify (dev only)
+    for aud in audiences or [None]:  # no audiences => unaudienced verify, dev only (guarded above)
         try:
             return google_id_token.verify_oauth2_token(token, _request, audience=aud)
         except Exception as e:

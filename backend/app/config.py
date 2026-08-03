@@ -23,7 +23,8 @@ class Settings(BaseSettings):
 
     oura_client_id: str = ""
     oura_client_secret: str = ""
-    oura_redirect_uri: str = "http://localhost:8000/v1/providers/oura/callback"
+    # Empty means "derive from public_base_url" — see providers.base.redirect_uri_for.
+    oura_redirect_uri: str = ""
 
     app_env: str = "dev"
     app_deep_link_scheme: str = "coach"

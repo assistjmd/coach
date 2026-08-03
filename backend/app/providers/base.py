@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Literal, Protocol
 
+from app.config import settings
+
 NormalizedKind = Literal[
     "workout",
     "sleep",
@@ -63,3 +65,21 @@ class Provider(Protocol):
 
 def day_of(dt: datetime) -> date:
     return dt.date()
+
+
+def redirect_uri_for(slug: str) -> str:
+    """The OAuth callback URL for a provider.
+
+    Derived from `public_base_url` so adding a provider needs no new config key.
+    A per-provider `<slug>_redirect_uri` setting still wins when set, for the
+    case where a provider's registered URI can't match our route shape.
+
+    The value must be byte-identical between the authorize request and the token
+    exchange — OAuth2 requires it — so both sides call this rather than
+    rebuilding the string.
+    """
+    cfg = settings()
+    override = (getattr(cfg, f"{slug}_redirect_uri", "") or "").strip()
+    if override:
+        return override
+    return f"{cfg.public_base_url.rstrip('/')}/v1/providers/{slug}/callback"

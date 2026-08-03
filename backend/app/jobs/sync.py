@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
@@ -12,6 +12,7 @@ from app.crypto import encrypt
 from app.db import SessionLocal
 from app.models import (
     HRVReading,
+    OAuthStateUse,
     OAuthToken,
     ReadinessScore,
     SleepSession,
@@ -33,6 +34,27 @@ def sync_all() -> None:
             sync_one(tok.id)
         except Exception:
             log.exception("sync failed for token %s (%s)", tok.id, tok.provider)
+    _purge_oauth_states()
+
+
+def _purge_oauth_states() -> None:
+    """Drop spent OAuth state records once they're older than any live token.
+
+    State tokens expire in 10 minutes (`jwt.STATE_TTL`), so a day-old row can no
+    longer match anything the signature check would accept. Piggy-backs on
+    `sync_all` rather than earning its own scheduler entry.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+    try:
+        with SessionLocal() as db:
+            deleted = (
+                db.query(OAuthStateUse).filter(OAuthStateUse.used_at < cutoff).delete()
+            )
+            db.commit()
+        if deleted:
+            log.info("purged %d spent oauth states", deleted)
+    except Exception:
+        log.exception("oauth state purge failed")
 
 
 def sync_one(token_id) -> int:

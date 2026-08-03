@@ -18,7 +18,8 @@ struct MeResponse: Decodable {
 struct ConnectionsView: View {
     @State private var me: MeResponse?
     @State private var error: String?
-    @EnvironmentObject var health: HealthKitManager
+    @State private var notice: String?
+    @State private var busySlug: String?
 
     var body: some View {
         NavigationStack {
@@ -26,7 +27,11 @@ struct ConnectionsView: View {
                 if let me {
                     Section("Connected") {
                         ForEach(me.providers) { p in
-                            ProviderTile(p: p)
+                            ProviderTile(
+                                p: p,
+                                isBusy: busySlug == p.slug,
+                                run: { await run(p.slug, $0) }
+                            )
                         }
                     }
                 } else if let error {
@@ -41,7 +46,27 @@ struct ConnectionsView: View {
             .onReceive(NotificationCenter.default.publisher(for: .providerConnected)) { _ in
                 Task { await load() }
             }
+            .alert("Connection", isPresented: .constant(notice != nil)) {
+                Button("OK") { notice = nil }
+            } message: {
+                Text(notice ?? "")
+            }
         }
+    }
+
+    /// Runs a connect/disconnect action, then always reloads so the row reflects
+    /// the server rather than what we hoped happened.
+    private func run(_ slug: String, _ action: () async throws -> String?) async {
+        busySlug = slug
+        defer { busySlug = nil }
+        do {
+            if let message = try await action() {
+                notice = message
+            }
+        } catch {
+            notice = error.localizedDescription
+        }
+        await load()
     }
 
     private func load() async {
@@ -56,6 +81,11 @@ struct ConnectionsView: View {
 
 private struct ProviderTile: View {
     let p: ProviderRow
+    let isBusy: Bool
+    /// Runs the given work and surfaces its optional message. Returning nil means
+    /// "succeeded, say nothing".
+    let run: (@escaping () async throws -> String?) async -> Void
+
     @EnvironmentObject var health: HealthKitManager
 
     var body: some View {
@@ -73,7 +103,11 @@ private struct ProviderTile: View {
                 }
             }
             Spacer()
-            actionButton
+            if isBusy {
+                ProgressView()
+            } else {
+                actionButton
+            }
         }
     }
 
@@ -81,19 +115,24 @@ private struct ProviderTile: View {
     private var actionButton: some View {
         if p.slug == "healthkit" {
             Button(health.authorized ? "Authorized" : "Authorize") {
-                Task { await health.requestAuthorization() }
+                Task { await run { await health.requestAuthorization(); return nil } }
             }
             .disabled(health.authorized)
         } else if p.connected {
             Button("Disconnect", role: .destructive) {
                 Task {
-                    try? await APIClient.shared.delete("/v1/providers/\(p.slug)")
+                    await run {
+                        try await APIClient.shared.delete("/v1/providers/\(p.slug)")
+                        return nil
+                    }
                 }
             }
         } else {
             Button("Connect") {
                 Task {
-                    try? await ProviderConnectFlow.shared.connect(providerSlug: p.slug)
+                    await run {
+                        try await ProviderConnectFlow.shared.connect(providerSlug: p.slug).message
+                    }
                 }
             }
         }

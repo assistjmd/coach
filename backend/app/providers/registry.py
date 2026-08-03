@@ -1,3 +1,4 @@
+from app.config import settings
 from app.providers.base import Provider
 from app.providers.healthkit import HealthKitProvider
 from app.providers.oura import OuraProvider
@@ -6,6 +7,12 @@ _PROVIDERS: dict[str, Provider] = {
     "oura": OuraProvider(),
     "healthkit": HealthKitProvider(),
 }
+
+if settings().app_env == "dev":
+    # Import lazily so the mock module isn't even loaded outside dev.
+    from app.providers.mock import MockProvider
+
+    _PROVIDERS["mock"] = MockProvider()
 
 
 def get_provider(slug: str) -> Provider:

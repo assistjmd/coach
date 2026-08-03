@@ -9,6 +9,7 @@ from app.models.fitness import (
     Workout,
 )
 from app.models.goal import Goal
+from app.models.oauth_state import OAuthStateUse
 from app.models.oauth_token import OAuthToken
 from app.models.user import User
 
@@ -19,6 +20,7 @@ __all__ = [
     "Goal",
     "HRVReading",
     "HeartRateSample",
+    "OAuthStateUse",
     "OAuthToken",
     "ReadinessScore",
     "SleepSession",
