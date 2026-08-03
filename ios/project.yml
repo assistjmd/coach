@@ -8,7 +8,7 @@ options:
 
 settings:
   base:
-    DEVELOPMENT_TEAM: ""           # fill in Apple Team ID
+    DEVELOPMENT_TEAM: "2VDRZ5H7UR"
     SWIFT_VERSION: "5.10"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
