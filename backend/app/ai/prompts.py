@@ -22,8 +22,35 @@ def user_context_block(profile: dict) -> str:
     parts = [f"User: {profile.get('display_name') or '(anonymous)'}"]
     goal = profile.get("goal")
     if goal:
-        parts.append(f"Goal: {goal}")
+        parts.append(_format_goal(goal))
     tz = profile.get("timezone")
     if tz:
         parts.append(f"Timezone: {tz}")
     return "\n".join(parts)
+
+
+def _format_goal(goal: dict) -> str:
+    """Render the goal as prose.
+
+    `goal` is the dict built by `ai/data.py::_goal`. Interpolating it directly
+    put a Python dict repr — braces, quotes, `None`s — into the prompt, which is
+    both noise and a weaker signal than plain language.
+    """
+    kind = goal.get("kind") or "adaptive"
+    sport = goal.get("sport")
+    headline = {
+        "race": f"training for a {sport} race" if sport else "training for a race",
+        "improvement": f"working on {sport} performance" if sport else "working on performance",
+        "adaptive": f"training adaptively in {sport}" if sport else "training adaptively",
+    }.get(kind, kind)
+
+    lines = [f"Goal: {headline}"]
+    if goal.get("target_date"):
+        lines.append(f"Target date: {goal['target_date']}")
+    if goal.get("description"):
+        lines.append(f"Athlete's own words: {goal['description']}")
+    params = goal.get("params")
+    if params:
+        detail = ", ".join(f"{k}={v}" for k, v in params.items())
+        lines.append(f"Targets: {detail}")
+    return "\n".join(lines)

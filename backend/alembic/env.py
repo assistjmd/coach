@@ -9,7 +9,10 @@ from app import models  # noqa: F401  (import triggers model registration)
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers defaults to True, which would silence every
+    # application logger already created — `alembic upgrade` run in-process
+    # (as the test suite does) would otherwise leave app logging dead.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 config.set_main_option("sqlalchemy.url", settings().database_url)
 

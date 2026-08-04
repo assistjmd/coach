@@ -10,6 +10,9 @@ struct DashboardView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     if let brief {
+                        if brief.stale {
+                            staleBanner(brief)
+                        }
                         readinessCard(brief)
                         prescriptionCard(brief)
                         if let rationale = brief.rationale {
@@ -36,6 +39,17 @@ struct DashboardView: View {
                 await load()
             }
         }
+    }
+
+    /// Shown when the server fell back to an older brief because it couldn't
+    /// generate one for today. Presenting stale numbers as current would be
+    /// worse than saying nothing.
+    private func staleBanner(_ b: TodayBrief) -> some View {
+        Label("This brief is from \(b.day) — we couldn't build a new one yet.",
+              systemImage: "clock.arrow.circlepath")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func readinessCard(_ b: TodayBrief) -> some View {
@@ -71,10 +85,14 @@ struct DashboardView: View {
 }
 
 struct TodayBrief: Decodable {
+    // `day` stays a String: it is a calendar date, and decoding it as a Date
+    // would shift it across timezones.
     let day: String
     let readinessSummary: String
     let trainingPrescription: String
     let rationale: String?
+    /// True when the server served an older brief rather than today's.
+    let stale: Bool
 }
 
 struct Card<Content: View>: View {

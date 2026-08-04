@@ -69,6 +69,12 @@ class HRVReading(Base):
     """HRV readings. NOTE: unit is critical — Oura is rMSSD, HealthKit is SDNN; do NOT coerce."""
 
     __tablename__ = "hrv_readings"
+    # Natural key rather than a source_record_id column: a point measurement is
+    # identified by when it was taken and who took it. One source cannot report
+    # two different HRV values for the same instant.
+    __table_args__ = (
+        UniqueConstraint("user_id", "source", "measured_at", name="uq_hrv_measured_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = _user_fk()
@@ -81,6 +87,9 @@ class HRVReading(Base):
 
 class HeartRateSample(Base):
     __tablename__ = "heart_rate_samples"
+    __table_args__ = (
+        UniqueConstraint("user_id", "source", "measured_at", name="uq_hr_measured_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = _user_fk()
@@ -104,6 +113,12 @@ class ReadinessScore(Base):
 
 class BodyMetric(Base):
     __tablename__ = "body_metrics"
+    # `metric` is part of the key: weight and VO2 max can share a timestamp.
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "source", "metric", "measured_at", name="uq_body_metric_measured_at"
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = _user_fk()

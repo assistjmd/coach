@@ -190,6 +190,42 @@ def _persist(db: Session, user_id: uuid.UUID, slug: str, tokenset: TokenSet) -> 
     db.commit()
 
 
+class SyncResponse(BaseModel):
+    provider: str
+    records: int
+
+
+@router.post("/{slug}/sync", response_model=SyncResponse)
+def sync_now(
+    slug: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> SyncResponse:
+    """Pull from a connected provider immediately.
+
+    The scheduler only runs every 30 minutes, which is far too slow a loop for
+    "I just connected it, where's my data" — both for the user right after
+    onboarding and for anyone developing against this.
+    """
+    # Imported here: app.jobs.sync imports load_tokenset from this module, so a
+    # module-level import would be circular.
+    from app.jobs.sync import sync_one
+
+    row = (
+        db.query(OAuthToken)
+        .filter(OAuthToken.user_id == user.id, OAuthToken.provider == slug)
+        .one_or_none()
+    )
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"{slug} is not connected")
+    try:
+        written = sync_one(row.id)
+    except Exception as e:
+        log.exception("manual sync failed for user=%s provider=%s", user.id, slug)
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"sync failed: {e}") from e
+    return SyncResponse(provider=slug, records=written)
+
+
 @router.delete("/{slug}", status_code=status.HTTP_204_NO_CONTENT)
 def disconnect(
     slug: str,

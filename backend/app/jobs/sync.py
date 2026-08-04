@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.crypto import encrypt
 from app.db import SessionLocal
 from app.models import (
+    BodyMetric,
+    HeartRateSample,
     HRVReading,
     OAuthStateUse,
     OAuthToken,
@@ -18,11 +20,15 @@ from app.models import (
     SleepSession,
     Workout,
 )
-from app.providers import all_providers, get_provider
+from app.providers import get_provider
 from app.providers.base import NormalizedRecord
 from app.routes.providers import load_tokenset
 
 log = logging.getLogger("coach.sync")
+
+# How far back to re-fetch beyond the last watermark, to catch late-arriving data.
+SYNC_OVERLAP = timedelta(days=3)
+COMMIT_EVERY = 100
 
 
 def sync_all() -> None:
@@ -75,11 +81,27 @@ def sync_one(token_id) -> int:
             tok.expires_at = ts.expires_at
             db.commit()
 
-        since = tok.last_synced_at
+        # Stamp the watermark from before the fetch, not after: anything the
+        # provider creates while we're iterating would otherwise fall into the
+        # gap and never be picked up.
+        sync_start = datetime.now(timezone.utc)
+
+        # Re-fetch a few days behind the watermark rather than resuming exactly
+        # at it. Providers backfill: Whoop recovery scores land hours after the
+        # cycle they describe, Strava activities get edited and re-uploaded. A
+        # strict watermark drops anything whose timestamp precedes the last sync
+        # but which only appeared afterwards — permanently, since we'd never ask
+        # for that window again. Safe because every kind is now idempotent.
+        since = (tok.last_synced_at - SYNC_OVERLAP) if tok.last_synced_at else None
+
         for rec in provider.sync(ts, since):
             _apply(db, tok.user_id, tok.provider, rec)
             written += 1
-        tok.last_synced_at = datetime.now(timezone.utc)
+            # Commit in batches so a first-connect backfill of several hundred
+            # activities isn't one transaction that loses everything on one bad row.
+            if written % COMMIT_EVERY == 0:
+                db.commit()
+        tok.last_synced_at = sync_start
         db.commit()
     return written
 
@@ -115,15 +137,16 @@ def _apply(db: Session, user_id, source: str, rec: NormalizedRecord) -> None:
         )
         db.execute(stmt.on_conflict_do_nothing(constraint="uq_sleep_source_id"))
     elif rec.kind == "hrv":
-        db.add(
-            HRVReading(
-                user_id=user_id,
-                source=source,
-                measured_at=p["measured_at"],
-                rmssd_ms=p.get("rmssd_ms"),
-                sdnn_ms=p.get("sdnn_ms"),
-            )
+        # rMSSD and SDNN live in separate columns on purpose — Oura reports the
+        # former, Apple Health the latter, and they are not interchangeable.
+        stmt = pg_insert(HRVReading).values(
+            user_id=user_id,
+            source=source,
+            measured_at=p["measured_at"],
+            rmssd_ms=p.get("rmssd_ms"),
+            sdnn_ms=p.get("sdnn_ms"),
         )
+        db.execute(stmt.on_conflict_do_nothing(constraint="uq_hrv_measured_at"))
     elif rec.kind == "readiness":
         stmt = pg_insert(ReadinessScore).values(
             user_id=user_id,
@@ -133,6 +156,30 @@ def _apply(db: Session, user_id, source: str, rec: NormalizedRecord) -> None:
             raw=p.get("raw"),
         )
         db.execute(stmt.on_conflict_do_nothing(constraint="uq_readiness_day"))
+    elif rec.kind == "heart_rate":
+        stmt = pg_insert(HeartRateSample).values(
+            user_id=user_id,
+            source=source,
+            measured_at=p["measured_at"],
+            bpm=p["bpm"],
+            context=p.get("context"),
+        )
+        db.execute(stmt.on_conflict_do_nothing(constraint="uq_hr_measured_at"))
+    elif rec.kind == "body_metric":
+        stmt = pg_insert(BodyMetric).values(
+            user_id=user_id,
+            source=source,
+            metric=p["metric"],
+            value=p["value"],
+            measured_at=p["measured_at"],
+        )
+        db.execute(stmt.on_conflict_do_nothing(constraint="uq_body_metric_measured_at"))
+    else:
+        # Reaching here means a provider emits a kind this function doesn't
+        # persist. Silence is how `heart_rate` and `body_metric` were dropped on
+        # the floor for as long as they were — a provider looked like it was
+        # syncing while its most useful signal went nowhere.
+        log.warning("unhandled normalized kind %r from source %s", rec.kind, source)
 
 
 def _duration_s(p: dict) -> int:
