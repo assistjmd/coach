@@ -9,6 +9,8 @@ options:
 settings:
   base:
     DEVELOPMENT_TEAM: "2VDRZ5H7UR"
+    # App Store Connect rejects uploads with no 1024px icon (ITMS-90022).
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     SWIFT_VERSION: "5.10"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
