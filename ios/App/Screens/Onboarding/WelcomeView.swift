@@ -8,7 +8,7 @@ struct WelcomeView: View {
         VStack(spacing: 32) {
             Spacer()
             VStack(spacing: 8) {
-                Text("Coach")
+                Text("Coach Will")
                     .font(.system(size: 48, weight: .bold))
                 Text("Your AI training partner")
                     .font(.title3)
