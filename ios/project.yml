@@ -35,7 +35,7 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: Coach
+        CFBundleDisplayName: Coach Will
         # Baked in at build time and read by APIClient. See App/Config.xcconfig.
         CoachAPIBaseURL: $(COACH_API_BASE_URL)
         CFBundleShortVersionString: $(MARKETING_VERSION)
