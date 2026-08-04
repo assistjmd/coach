@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,6 +8,21 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str
+
+    @field_validator("database_url")
+    @classmethod
+    def _use_psycopg_driver(cls, v: str) -> str:
+        """Accept the `postgres://` URLs hosting providers hand out.
+
+        Fly, Heroku, Railway and friends all inject `postgres://…`. SQLAlchemy 2
+        refuses that scheme outright, and plain `postgresql://` selects psycopg2,
+        which isn't installed — this project uses psycopg 3. Rewriting here means
+        DATABASE_URL can be pasted verbatim from any provider.
+        """
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                return "postgresql+psycopg://" + v[len(prefix):]
+        return v
     jwt_secret: str
     jwt_alg: str = "HS256"
     jwt_expires_hours: int = 720

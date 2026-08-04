@@ -72,6 +72,33 @@ Simulator builds work as-is. Running on a device needs `DEVELOPMENT_TEAM` in
 `project.yml` (already set) and a signing certificate in Xcode. **HealthKit only
 works on a physical device** — the simulator has no Health data.
 
+### Pointing the app at a backend
+
+A phone cannot reach the Mac's `localhost`, so device builds need a reachable
+URL. `COACH_API_BASE_URL` in `App/Config.xcconfig` is baked into Info.plist at
+build time and read by `APIClient`. To override without editing a tracked file,
+create `App/Config.local.xcconfig` (gitignored):
+
+```
+COACH_API_BASE_URL = https:/$()/coach-backend.fly.dev
+```
+
+The `$()` expands to nothing; it exists only because xcconfig would otherwise
+read `//` as the start of a comment.
+
+Whatever URL you use must be **HTTPS with a publicly trusted certificate**, or
+App Transport Security blocks it. Deployed hosts and Tailscale's `serve` both
+qualify; a plain `http://` LAN address does not.
+
+## Deploy
+
+See [`backend/deploy/README.md`](backend/deploy/README.md). Fly is the supported
+path — `fly.toml` and `Dockerfile` live in `backend/`, and the image is built
+remotely so Docker isn't needed locally.
+
+`PUBLIC_BASE_URL` must match the deployed hostname: the OAuth callback derives
+from it, and providers compare redirect URIs as exact strings.
+
 Google Sign-In is not wired into the UI yet; when it is, it will need a
 `GoogleService-Info.plist`. The HealthKit + background-delivery entitlements are
 declared in `ios/App/App.entitlements`.

@@ -1,0 +1,50 @@
+# Fly.io deployment.
+#
+# App name is claimed on first `fly launch`; change it here if that name is
+# taken. The hostname it produces (<app>.fly.dev) is what the iOS app and the
+# Oura callback both point at, so it must stay stable once set.
+
+app = "coach-backend"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # Runs in a one-off machine with database access, before the new version takes
+  # traffic. A failed migration aborts the deploy rather than leaving a running
+  # app pointed at a schema it doesn't match.
+  release_command = "alembic upgrade head"
+
+[env]
+  APP_ENV = "prod"
+  APP_DEEP_LINK_SCHEME = "coach"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+
+  # The scheduler lives inside the web process: sync every 30 minutes and the
+  # daily brief at a fixed hour. Letting Fly stop the machine when idle would
+  # silently stop both — no syncs, no briefs, and nothing to indicate why.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 40
+    hard_limit = 80
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+    # Generous, because the app opens a database connection and warms Apple's
+    # JWKS cache on startup.
+    grace_period = "15s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
