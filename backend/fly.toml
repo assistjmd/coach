@@ -4,7 +4,7 @@
 # taken. The hostname it produces (<app>.fly.dev) is what the iOS app and the
 # Oura callback both point at, so it must stay stable once set.
 
-app = "coach-backend"
+app = "jd-coach-api"
 primary_region = "ord"
 
 [build]
