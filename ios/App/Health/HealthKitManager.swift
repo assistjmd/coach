@@ -4,9 +4,25 @@ import HealthKit
 
 @MainActor
 final class HealthKitManager: ObservableObject {
-    @Published private(set) var authorized: Bool = false
+    /// Whether we have shown the system permission sheet.
+    ///
+    /// Deliberately NOT named `authorized`: HealthKit never reports read
+    /// authorization. `requestAuthorization` succeeds whether the user grants or
+    /// denies — telling us apart would leak what they chose, which Apple treats
+    /// as private. So this only says "we asked", and it is persisted because the
+    /// sheet is one-shot: asking twice does nothing, and the only way back after
+    /// a denial is Settings.
+    @Published private(set) var didRequestAuthorization: Bool =
+        UserDefaults.standard.bool(forKey: HealthKitManager.askedKey)
+    /// Whether Health has ever actually given us data. The only honest signal
+    /// that the grant went through.
+    @Published private(set) var hasData: Bool =
+        UserDefaults.standard.bool(forKey: HealthKitManager.hasDataKey)
     @Published private(set) var lastSync: Date?
     @Published private(set) var lastError: String?
+
+    private static let askedKey = "coach.hk.didRequestAuthorization"
+    private static let hasDataKey = "coach.hk.hasData"
 
     private let store = HKHealthStore()
     private let anchorsKey = "coach.hk.anchors.v1"
@@ -17,13 +33,24 @@ final class HealthKitManager: ObservableObject {
         guard isAvailable else { return }
         do {
             try await store.requestAuthorization(toShare: [], read: HealthKitTypes.readTypes())
-            authorized = true
+            didRequestAuthorization = true
+            UserDefaults.standard.set(true, forKey: Self.askedKey)
+        } catch {
+            lastError = error.localizedDescription
+            return
+        }
+        // Deliberately outside the do/catch above, and each step independent:
+        // previously a single failing `enableBackgroundDelivery` call — which
+        // happens when the entitlement isn't provisioned yet — threw past
+        // `startObservers()` and `syncOnce()`, so no observers were registered
+        // and the first sync never ran.
+        do {
             try await enableBackgroundDelivery()
-            startObservers()
-            await syncOnce()
         } catch {
             lastError = error.localizedDescription
         }
+        startObservers()
+        await syncOnce()
     }
 
     func syncOnce() async {
@@ -32,9 +59,27 @@ final class HealthKitManager: ObservableObject {
             if batch.isEmpty { return }
             let _: EmptyResp = try await APIClient.shared.postJSON("/v1/ingest/healthkit", body: batch)
             lastSync = Date()
+            if !hasData {
+                hasData = true
+                UserDefaults.standard.set(true, forKey: Self.hasDataKey)
+            }
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    /// Re-register observers on launch when the user has already been asked.
+    /// Previously this happened only as a side effect of re-prompting every
+    /// launch, because the asked-state wasn't persisted.
+    func resumeIfAuthorized() async {
+        guard isAvailable, didRequestAuthorization else { return }
+        do {
+            try await enableBackgroundDelivery()
+        } catch {
+            lastError = error.localizedDescription
+        }
+        startObservers()
+        await syncOnce()
     }
 
     // MARK: - background delivery
@@ -63,9 +108,15 @@ final class HealthKitManager: ObservableObject {
     }
 
     private func startObservers() {
+        // Sleep is included here on purpose: background delivery was being
+        // enabled for `.sleepAnalysis` while nothing observed it, so a night's
+        // sleep never triggered a sync of its own — it only arrived if some
+        // other type happened to fire afterwards.
+        let sleepType = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis)
         let types: [HKSampleType] = HealthKitTypes.quantityIdentifiers
             .compactMap { HKQuantityType.quantityType(forIdentifier: $0) }
             + [HKWorkoutType.workoutType()]
+            + (sleepType.map { [$0] } ?? [])
         for t in types {
             let q = HKObserverQuery(sampleType: t, predicate: nil) { [weak self] _, completion, _ in
                 Task { @MainActor in

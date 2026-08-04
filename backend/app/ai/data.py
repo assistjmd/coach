@@ -1,7 +1,7 @@
 """Query helpers that gather a user's recent fitness data into a JSON blob the
 LLM can read. Used by both daily-brief generation and chat tool calls."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select

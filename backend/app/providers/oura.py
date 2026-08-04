@@ -22,11 +22,11 @@ import httpx
 from app.config import settings
 from app.providers.base import (
     NormalizedRecord,
-    Provider,
     ProviderInfo,
     TokenSet,
     redirect_uri_for,
 )
+from app.providers.sports import OURA_SPORT, normalize
 
 _AUTHORIZE_URL = "https://cloud.ouraring.com/oauth/authorize"
 _TOKEN_URL = "https://api.ouraring.com/oauth/token"
@@ -166,7 +166,7 @@ def _sync_workouts(c: httpx.Client, start: str, end: str) -> Iterable[Normalized
             payload={
                 "started_at": w.get("start_datetime"),
                 "ended_at": w.get("end_datetime"),
-                "sport": w.get("activity"),
+                "sport": normalize(w.get("activity"), OURA_SPORT),
                 "distance_m": w.get("distance"),
                 "raw": w,
             },

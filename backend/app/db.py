@@ -36,7 +36,7 @@ def _factory() -> sessionmaker:
     return _session_factory
 
 
-def SessionLocal(**kwargs) -> Session:  # noqa: N802 — kept callable-compatible with sessionmaker
+def SessionLocal(**kwargs) -> Session:
     return _factory()(**kwargs)
 
 

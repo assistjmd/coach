@@ -1,6 +1,9 @@
 import SwiftUI
 
-struct OnboardingView: View {
+/// Pre-authentication screen. Everything that needs a bearer token — goal
+/// capture, HealthKit priming, provider connect — lives in `OnboardingFlowView`,
+/// which runs after sign-in.
+struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 32) {
             Spacer()

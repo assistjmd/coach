@@ -33,9 +33,11 @@ struct DashboardView: View {
             .navigationTitle("Today")
             .refreshable { await load() }
             .task {
-                if !health.authorized {
-                    await health.requestAuthorization()
-                }
+                // Deliberately does not request HealthKit authorization.
+                // Onboarding owns the first prompt — the system sheet is
+                // one-shot, so triggering it here would fire it before the
+                // explainer screen and burn the single chance to ask.
+                await health.syncOnce()
                 await load()
             }
         }

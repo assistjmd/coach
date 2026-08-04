@@ -1,19 +1,5 @@
 import SwiftUI
-
-struct ProviderRow: Decodable, Identifiable {
-    let slug: String
-    let displayName: String
-    let connected: Bool
-    let lastSyncedAt: Date?
-    var id: String { slug }
-}
-
-struct MeResponse: Decodable {
-    let id: String
-    let email: String?
-    let displayName: String?
-    let providers: [ProviderRow]
-}
+import UIKit
 
 struct ConnectionsView: View {
     @State private var me: MeResponse?
@@ -114,10 +100,25 @@ private struct ProviderTile: View {
     @ViewBuilder
     private var actionButton: some View {
         if p.slug == "healthkit" {
-            Button(health.authorized ? "Authorized" : "Authorize") {
-                Task { await run { await health.requestAuthorization(); return nil } }
+            // The server reports HealthKit as "connected" for every user, since
+            // it can't see the device's permission state. What it means locally
+            // is: have we asked, and has anything actually arrived.
+            if health.hasData {
+                Text("Syncing").font(.subheadline).foregroundStyle(.secondary)
+            } else if health.didRequestAuthorization {
+                // Asked, but nothing has come through — most likely denied.
+                // HealthKit won't tell us, and re-prompting does nothing, so
+                // point at the only place that can fix it.
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+            } else {
+                Button("Authorize") {
+                    Task { await run { await health.requestAuthorization(); return nil } }
+                }
             }
-            .disabled(health.authorized)
         } else if p.connected {
             Button("Disconnect", role: .destructive) {
                 Task {
