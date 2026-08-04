@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     jwt_expires_hours: int = 720
     fernet_key: str
 
-    apple_bundle_id: str = "com.coach.app"
+    apple_bundle_id: str = "com.trainwithcoach.app"
     apple_team_id: str = ""
     google_client_id_ios: str = ""
     google_client_id_web: str = ""

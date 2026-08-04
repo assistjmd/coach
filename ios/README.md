@@ -12,7 +12,7 @@ open Coach.xcodeproj
 ## Required setup before first build
 
 1. Open the project, select the **Coach** target → **Signing & Capabilities** → set your **Team**.
-2. The HealthKit and Background Delivery capabilities are already declared in `App/App.entitlements`. Verify they appear in the Capabilities pane and that your Apple Developer App ID `com.coach.app` has HealthKit enabled.
+2. The HealthKit and Background Delivery capabilities are already declared in `App/App.entitlements`. Verify they appear in the Capabilities pane and that your Apple Developer App ID `com.trainwithcoach.app` has HealthKit enabled.
 3. For the API base URL during dev, either:
    - Edit `APIClient.swift`'s default `baseURL`, OR
    - Set the UserDefaults key `coach.api_base_url` at launch (e.g. via a launch argument: `-coach.api_base_url http://<EC2-IP>`)
