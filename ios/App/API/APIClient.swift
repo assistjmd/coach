@@ -17,11 +17,19 @@ enum APIError: Error, LocalizedError {
 final class APIClient {
     static let shared = APIClient()
 
-    // For dev: point at the Elastic IP (no TLS yet) until domain + cert is set up.
-    // Override at runtime via UserDefaults key "coach.api_base_url" if needed.
+    /// Backend base URL, resolved in priority order:
+    ///
+    /// 1. `UserDefaults["coach.api_base_url"]` — runtime override, settable from
+    ///    a scheme launch argument when pointing at a throwaway backend.
+    /// 2. `CoachAPIBaseURL` in Info.plist — the build-time value, set by
+    ///    `COACH_API_BASE_URL` in `App/Config.xcconfig`. This is what device
+    ///    builds use, since a phone cannot reach the Mac's localhost.
+    /// 3. localhost, for the simulator.
     var baseURL: URL {
         if let s = UserDefaults.standard.string(forKey: "coach.api_base_url"),
            let u = URL(string: s) { return u }
+        if let s = Bundle.main.object(forInfoDictionaryKey: "CoachAPIBaseURL") as? String,
+           !s.isEmpty, let u = URL(string: s) { return u }
         return URL(string: "http://localhost:8000")!
     }
 

@@ -1,0 +1,17 @@
+// Build configuration for the iOS app.
+//
+// COACH_API_BASE_URL is baked into Info.plist as CoachAPIBaseURL and read by
+// APIClient. The simulator can talk to localhost; a physical device cannot, so
+// device builds need a reachable URL here.
+//
+// Note the `$()` in the middle of `https://` — xcconfig treats `//` as the start
+// of a comment, and `$()` expands to nothing, which breaks up the pair.
+//
+// To override without touching this file, create App/Config.local.xcconfig
+// (gitignored) containing your own COACH_API_BASE_URL line.
+
+COACH_API_BASE_URL = http:/$()/localhost:8000
+
+// Optional include — absent on a fresh clone, present once you make one.
+// Comes last so its value wins.
+#include? "Config.local.xcconfig"

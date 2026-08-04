@@ -25,10 +25,17 @@ targets:
     platform: iOS
     sources:
       - path: App
+        excludes:
+          - "*.xcconfig"
+    configFiles:
+      Debug: App/Config.xcconfig
+      Release: App/Config.xcconfig
     info:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Coach
+        # Baked in at build time and read by APIClient. See App/Config.xcconfig.
+        CoachAPIBaseURL: $(COACH_API_BASE_URL)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         # GENERATE_INFOPLIST_FILE is NO and this block is written over
