@@ -95,6 +95,11 @@ final class APIClient {
     }
 
     @discardableResult
+    func patch<R: Decodable>(_ path: String, body: [String: Any]) async throws -> R {
+        try await request(path, method: "PATCH", body: body)
+    }
+
+    @discardableResult
     func delete(_ path: String) async throws -> Void {
         let _: EmptyResponse = try await request(path, method: "DELETE", body: nil)
     }

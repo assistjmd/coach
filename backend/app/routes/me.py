@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import current_user
 from app.db import get_db
-from app.models import OAuthToken, User
+from app.models import LegalConsent, OAuthToken, User
 from app.providers import all_providers
 
 router = APIRouter(prefix="/v1", tags=["me"])
@@ -104,4 +104,84 @@ def reset_onboarding(
     if settings().app_env != "dev":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "not found")
     user.onboarded_at = None
+    db.commit()
+
+
+# Bumped when either document changes materially. The app compares this against
+# what the user last accepted and re-prompts on a mismatch, so a silent edit to
+# the terms does not quietly count as agreed.
+CURRENT_LEGAL_VERSION = "2026-08-05"
+
+
+class ConsentBody(BaseModel):
+    version: str
+
+
+class ConsentStatus(BaseModel):
+    current_version: str
+    accepted_version: str | None
+    accepted_at: datetime | None
+    up_to_date: bool
+
+
+@router.get("/me/consent", response_model=ConsentStatus)
+def consent_status(
+    user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> ConsentStatus:
+    latest = (
+        db.query(LegalConsent)
+        .filter(LegalConsent.user_id == user.id, LegalConsent.document == "terms")
+        .order_by(LegalConsent.accepted_at.desc())
+        .first()
+    )
+    return ConsentStatus(
+        current_version=CURRENT_LEGAL_VERSION,
+        accepted_version=latest.version if latest else None,
+        accepted_at=latest.accepted_at if latest else None,
+        up_to_date=bool(latest and latest.version == CURRENT_LEGAL_VERSION),
+    )
+
+
+@router.post("/me/consent", response_model=ConsentStatus, status_code=status.HTTP_201_CREATED)
+def record_consent(
+    body: ConsentBody,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> ConsentStatus:
+    """Record acceptance of the terms and privacy policy.
+
+    Written as two rows, one per document, because they are separate agreements
+    and a regulator asking "did they accept the privacy policy" should not have
+    to infer it from a row labelled "terms".
+    """
+    if body.version != CURRENT_LEGAL_VERSION:
+        # Refuse to record consent to a version that is not the live one. A stale
+        # client would otherwise write a record that looks like agreement to
+        # documents the user never saw.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"stale version {body.version}; current is {CURRENT_LEGAL_VERSION}",
+        )
+    for document in ("terms", "privacy"):
+        db.add(LegalConsent(user_id=user.id, document=document, version=body.version))
+    db.commit()
+    return consent_status(user=user, db=db)
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_account(
+    user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> None:
+    """Permanently delete the account and everything attached to it.
+
+    Required by App Store guideline 5.1.1(v): an app that creates accounts must
+    let you delete one from inside the app, not by emailing support.
+
+    Every table referencing `users.id` declares ON DELETE CASCADE, so this single
+    delete removes goals, briefs, chat history, workouts, sleep, HRV, body
+    metrics, provider tokens and consent records with it. Deliberately not a soft
+    delete: an erasure request under GDPR or CCPA means the data is gone, and a
+    flagged row that still holds health data does not satisfy that.
+    """
+    db.delete(user)
     db.commit()

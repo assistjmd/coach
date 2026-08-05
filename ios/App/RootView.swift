@@ -17,9 +17,12 @@ struct RootView: View {
                 // Goal capture has to come after sign-in — PUT /v1/goal needs the
                 // bearer token — so it is its own phase rather than part of the
                 // pre-auth welcome screen.
-                OnboardingFlowView()
+                ConsentGate { OnboardingFlowView() }
             case .ready:
-                MainTabView()
+                // Gated too, not just onboarding: when the documents change,
+                // existing users have to accept the new version as well, and
+                // they never pass through onboarding again.
+                ConsentGate { MainTabView() }
             }
         }
         .preferredColorScheme(.dark)
@@ -61,6 +64,8 @@ struct MainTabView: View {
                 .tabItem { Label("TODAY", systemImage: "bolt.fill") }
             ChatView()
                 .tabItem { Label("COACH", systemImage: "text.bubble.fill") }
+            InsightsView()
+                .tabItem { Label("HISTORY", systemImage: "chart.bar.fill") }
             ConnectionsView()
                 .tabItem { Label("SOURCES", systemImage: "antenna.radiowaves.left.and.right") }
             ProfileView()

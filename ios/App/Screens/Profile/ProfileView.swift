@@ -6,6 +6,8 @@ struct ProfileView: View {
     @State private var loaded = false
     @State private var saveState: SaveState = .idle
     @FocusState private var notesFocused: Bool
+    @State private var confirmingDelete = false
+    @State private var deleting = false
 
     private enum SaveState: Equatable {
         case idle, saving, saved, failed(String)
@@ -147,8 +149,57 @@ struct ProfileView: View {
     }
 
     private var signOutRow: some View {
-        ActionButton(title: "Sign out", filled: false) { session.signOut() }
-            .padding(.top, 8)
+        VStack(spacing: Theme.Metric.stack) {
+            ActionButton(title: "Sign out", filled: false) { session.signOut() }
+
+            // Required by App Store guideline 5.1.1(v): an app that creates
+            // accounts must let you delete one from inside it, not by emailing
+            // support. It is also what makes the erasure right in the privacy
+            // policy real rather than aspirational.
+            Button {
+                confirmingDelete = true
+            } label: {
+                Text(deleting ? "DELETING…" : "DELETE ACCOUNT")
+                    .font(Theme.Font.button)
+                    .tracking(1.4)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 17)
+                    .foregroundStyle(Theme.Palette.bad)
+                    .overlay(Rectangle().stroke(Theme.Palette.bad.opacity(0.5), lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
+            }
+            .buttonStyle(PressStyle())
+            .disabled(deleting)
+
+            Text("Deleting removes your goal, briefs, chat history and all "
+                 + "synced health data. It cannot be undone.")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.Palette.textDim)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.top, 8)
+        .alert("Delete your account?", isPresented: $confirmingDelete) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) { Task { await deleteAccount() } }
+        } message: {
+            Text("This permanently removes your account and every piece of data "
+                 + "attached to it. There is no way to recover it.")
+        }
+    }
+
+    private func deleteAccount() async {
+        deleting = true
+        defer { deleting = false }
+        do {
+            try await APIClient.shared.delete("/v1/me")
+            // Sign out locally too: the bearer token is still cryptographically
+            // valid, and leaving it in the keychain would leave the app in a
+            // state where every request 401s with no explanation.
+            session.signOut()
+        } catch {
+            saveState = .failed("Couldn't delete the account. \(error.localizedDescription)")
+        }
     }
 
     private func load() async {
