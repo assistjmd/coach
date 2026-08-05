@@ -53,7 +53,19 @@ class HKHeartRate(BaseModel):
 
 
 class HKBodyMetric(BaseModel):
-    metric: Literal["weight_kg", "body_fat_pct", "vo2_max", "resting_hr"]
+    # Daily activity totals are included because every other metric here needs an
+    # Apple Watch. An iPhone-only user has steps and nothing else, so without
+    # these the app ingests literally nothing from Apple Health while Health
+    # itself is visibly full of data.
+    metric: Literal[
+        "weight_kg",
+        "body_fat_pct",
+        "vo2_max",
+        "resting_hr",
+        "steps",
+        "active_energy_kcal",
+        "exercise_minutes",
+    ]
     value: float
     measured_at: datetime
 

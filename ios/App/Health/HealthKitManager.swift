@@ -270,8 +270,73 @@ final class HealthKitManager: ObservableObject {
             anchors["mass"] = newAnchor
         }
 
+        // Daily activity totals.
+        //
+        // Everything above needs an Apple Watch: HRV, resting HR, VO2 max and
+        // sleep simply don't exist on an iPhone alone. A user without a watch
+        // therefore synced nothing at all, while Apple Health visibly held their
+        // step count — which reads as the app being broken.
+        //
+        // Aggregated per day rather than sent raw: steps arrive as thousands of
+        // small samples, and the coach reasons about daily totals anyway.
+        batch.body_metrics.append(contentsOf: await dailyTotals())
+
         saveAnchors(anchors)
         return batch
+    }
+
+    /// Per-day sums for the activity metrics an iPhone records on its own.
+    ///
+    /// Uses the same 90-day window as the initial backfill. Re-sending a day is
+    /// harmless: ingest upserts on (metric, measured_at), so a day that already
+    /// exists is updated rather than duplicated — which is what we want, since
+    /// today's total keeps changing until midnight.
+    private func dailyTotals() async -> [HKBodyMetricDTO] {
+        let wanted: [(HKQuantityTypeIdentifier, String, HKUnit)] = [
+            (.stepCount, "steps", .count()),
+            (.activeEnergyBurned, "active_energy_kcal", .kilocalorie()),
+            (.appleExerciseTime, "exercise_minutes", .minute()),
+        ]
+        var out: [HKBodyMetricDTO] = []
+        for (identifier, name, unit) in wanted {
+            guard let type = HKQuantityType.quantityType(forIdentifier: identifier) else { continue }
+            out.append(contentsOf: await dailySums(type: type, metric: name, unit: unit))
+        }
+        return out
+    }
+
+    private func dailySums(
+        type: HKQuantityType, metric: String, unit: HKUnit
+    ) async -> [HKBodyMetricDTO] {
+        let cal = Calendar.current
+        guard let start = cal.date(
+            byAdding: .day, value: -Self.backfillDays, to: cal.startOfDay(for: Date())
+        ) else { return [] }
+
+        return await withCheckedContinuation { cont in
+            let q = HKStatisticsCollectionQuery(
+                quantityType: type,
+                quantitySamplePredicate: HKQuery.predicateForSamples(
+                    withStart: start, end: nil, options: .strictStartDate
+                ),
+                options: .cumulativeSum,
+                anchorDate: start,
+                intervalComponents: DateComponents(day: 1)
+            )
+            q.initialResultsHandler = { _, results, _ in
+                var rows: [HKBodyMetricDTO] = []
+                results?.enumerateStatistics(from: start, to: Date()) { stat, _ in
+                    guard let sum = stat.sumQuantity()?.doubleValue(for: unit), sum > 0 else {
+                        return
+                    }
+                    rows.append(HKBodyMetricDTO(
+                        metric: metric, value: sum, measured_at: stat.startDate
+                    ))
+                }
+                cont.resume(returning: rows)
+            }
+            store.execute(q)
+        }
     }
 
     /// Average and peak heart rate across a workout.
