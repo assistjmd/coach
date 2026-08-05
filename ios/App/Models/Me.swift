@@ -5,6 +5,9 @@ struct ProviderRow: Decodable, Identifiable {
     let displayName: String
     let connected: Bool
     let lastSyncedAt: Date?
+    /// Why the last sync failed, if it did. Without this a revoked
+    /// authorization and a provider with nothing new both render as silence.
+    let lastSyncError: String?
     var id: String { slug }
 }
 

@@ -71,7 +71,17 @@ final class HealthKitManager: ObservableObject {
     func syncOnce() async {
         do {
             let batch = try await fetchDeltas()
-            if batch.isEmpty { return }
+            if batch.isEmpty {
+                // An empty pull after authorization is ambiguous by design:
+                // HealthKit returns no samples for types the user denied and
+                // never reveals which. Saying so beats returning silently, since
+                // the two cases need completely different actions from the user.
+                if didRequestAuthorization, !hasData {
+                    lastError = "Apple Health returned no data. Check that Coach Will "
+                        + "is enabled in Settings › Privacy & Security › Health."
+                }
+                return
+            }
             // Sent in chunks: the first sync after authorization can carry a
             // quarter's worth of samples, and as one request that body is large
             // enough to time out at the edge before the server sees it.
@@ -165,6 +175,12 @@ final class HealthKitManager: ObservableObject {
         )
         for sample in workouts {
             guard let w = sample as? HKWorkout else { continue }
+            // Heart rate is not carried on the workout itself; it lives in
+            // separate samples that have to be queried over the workout's window.
+            // These were previously sent as nil, which left every Apple Health
+            // session with no intensity signal — and training load can't be
+            // computed from duration alone.
+            let hr = await heartRate(during: w)
             batch.workouts.append(HKWorkoutDTO(
                 source_record_id: w.uuid.uuidString,
                 sport: w.workoutActivityType.coachName,
@@ -172,8 +188,8 @@ final class HealthKitManager: ObservableObject {
                 ended_at: w.endDate,
                 duration_s: Int(w.duration),
                 distance_m: w.totalDistance?.doubleValue(for: .meter()),
-                avg_hr: nil,
-                max_hr: nil
+                avg_hr: hr.avg,
+                max_hr: hr.max
             ))
         }
         anchors["workouts"] = newWorkoutAnchor
@@ -256,6 +272,38 @@ final class HealthKitManager: ObservableObject {
 
         saveAnchors(anchors)
         return batch
+    }
+
+    /// Average and peak heart rate across a workout.
+    ///
+    /// One statistics query per workout rather than pulling every sample and
+    /// bucketing them: HealthKit does the aggregation, so a 90-day backfill
+    /// doesn't drag tens of thousands of individual readings through memory.
+    ///
+    /// Returns nils rather than throwing. A workout recorded without a heart
+    /// rate monitor is normal, not an error, and must not fail the whole sync.
+    private func heartRate(during workout: HKWorkout) async -> (avg: Int?, max: Int?) {
+        guard let hrType = HKQuantityType.quantityType(forIdentifier: .heartRate) else {
+            return (nil, nil)
+        }
+        let predicate = HKQuery.predicateForSamples(
+            withStart: workout.startDate, end: workout.endDate, options: .strictStartDate
+        )
+        let bpm = HKUnit.count().unitDivided(by: .minute())
+
+        return await withCheckedContinuation { cont in
+            let q = HKStatisticsQuery(
+                quantityType: hrType,
+                quantitySamplePredicate: predicate,
+                options: [.discreteAverage, .discreteMax]
+            ) { _, stats, _ in
+                let avg = stats?.averageQuantity()?.doubleValue(for: bpm)
+                let peak = stats?.maximumQuantity()?.doubleValue(for: bpm)
+                cont.resume(returning: (avg.map { Int($0.rounded()) },
+                                        peak.map { Int($0.rounded()) }))
+            }
+            store.execute(q)
+        }
     }
 
     private func fetchAnchored(type: HKSampleType, anchor: HKQueryAnchor?) async throws -> ([HKSample], HKQueryAnchor?) {

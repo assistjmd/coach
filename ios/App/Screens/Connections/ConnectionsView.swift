@@ -133,20 +133,61 @@ private struct ProviderRowView: View {
         return p.connected
     }
 
+    /// Sync state, most-actionable first.
+    ///
+    /// Order matters: an error outranks a timestamp, because a connection that
+    /// synced yesterday and is broken today would otherwise read as healthy.
+    /// "Connected, waiting for first sync" is called out separately from
+    /// "synced" so the gap after connecting doesn't look like a failure.
+    @ViewBuilder
     private var status: some View {
-        Group {
-            if let ts = p.lastSyncedAt {
-                Text("Synced \(ts.formatted(.relative(presentation: .named)))")
-                    .foregroundStyle(Theme.Palette.textDim)
-            } else if isLive {
-                Text("Connected")
-                    .foregroundStyle(Theme.Palette.accent)
-            } else {
-                Text("Not connected")
-                    .foregroundStyle(Theme.Palette.textDim)
-            }
+        if p.slug == "healthkit" {
+            healthKitStatus
+        } else if let err = p.lastSyncError {
+            Text(err)
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.bad)
+                .lineLimit(3)
+        } else if let ts = p.lastSyncedAt {
+            Text("Synced \(ts.formatted(.relative(presentation: .named)))")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.textDim)
+        } else if p.connected {
+            Text("Connected — waiting for first sync")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.caution)
+        } else {
+            Text("Not connected")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.textDim)
         }
-        .font(Theme.Font.caption)
+    }
+
+    /// HealthKit is local, so its state comes from the device rather than the
+    /// server. It never reports whether read access was granted — an unauthorized
+    /// type simply returns no samples — so "denied" and "genuinely empty" are
+    /// indistinguishable here, and the copy says what to check instead of
+    /// guessing.
+    @ViewBuilder
+    private var healthKitStatus: some View {
+        if let err = health.lastError {
+            Text(err)
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.bad)
+                .lineLimit(3)
+        } else if health.hasData, let ts = health.lastSync {
+            Text("Synced \(ts.formatted(.relative(presentation: .named)))")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.textDim)
+        } else if health.didRequestAuthorization {
+            Text("No data yet — check Settings › Privacy › Health")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.caution)
+        } else {
+            Text("Not authorized")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.textDim)
+        }
     }
 
     @ViewBuilder
