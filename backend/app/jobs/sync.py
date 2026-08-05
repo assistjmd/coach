@@ -64,6 +64,26 @@ def _purge_oauth_states() -> None:
 
 
 def sync_one(token_id) -> int:
+    """Pull deltas for one connected provider.
+
+    Failures are recorded on the token rather than only logged: the app shows
+    the reason on the Sources screen, so a revoked authorization or an expired
+    refresh token says so instead of looking like "no new data".
+    """
+    try:
+        return _sync_one_inner(token_id)
+    except Exception as exc:
+        with SessionLocal() as db:
+            tok = db.get(OAuthToken, token_id)
+            if tok is not None:
+                # Truncated and type-prefixed: this is surfaced to a user, and a
+                # full provider traceback is neither useful nor safe to show.
+                tok.last_sync_error = f"{type(exc).__name__}: {exc}"[:300]
+                db.commit()
+        raise
+
+
+def _sync_one_inner(token_id) -> int:
     written = 0
     with SessionLocal() as db:
         tok = db.get(OAuthToken, token_id)
@@ -102,6 +122,7 @@ def sync_one(token_id) -> int:
             if written % COMMIT_EVERY == 0:
                 db.commit()
         tok.last_synced_at = sync_start
+        tok.last_sync_error = None
         db.commit()
     return written
 

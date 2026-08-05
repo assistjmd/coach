@@ -22,4 +22,9 @@ class OAuthToken(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scope: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Why the last sync failed, or NULL if it succeeded. Without this a broken
+    # connection is indistinguishable from one that simply has nothing new —
+    # both render as silence, which is the most common complaint about apps in
+    # this category.
+    last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

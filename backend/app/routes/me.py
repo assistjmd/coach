@@ -18,6 +18,9 @@ class ConnectedProvider(BaseModel):
     display_name: str
     connected: bool
     last_synced_at: datetime | None
+    # Why the last sync failed, if it did. The app shows this so a revoked
+    # authorization reads as a revoked authorization rather than as no new data.
+    last_sync_error: str | None = None
 
 
 class MeResponse(BaseModel):
@@ -50,6 +53,7 @@ def _me(user: User, db: Session) -> MeResponse:
             display_name=p.info.display_name,
             connected=(p.info.slug in tokens) or p.info.auth_kind == "device_push",
             last_synced_at=tokens[p.info.slug].last_synced_at if p.info.slug in tokens else None,
+            last_sync_error=tokens[p.info.slug].last_sync_error if p.info.slug in tokens else None,
         )
         for p in all_providers()
     ]

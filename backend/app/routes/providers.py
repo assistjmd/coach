@@ -27,7 +27,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -108,6 +108,7 @@ def _consume_state(db: Session, claims_jti: uuid.UUID, user_id: uuid.UUID, slug:
 @router.get("/{slug}/callback")
 def callback(
     slug: str,
+    background: BackgroundTasks,
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
@@ -164,17 +165,40 @@ def callback(
         return _deep_link(slug, reason="exchange_failed", ref=ref)
 
     try:
-        _persist(db, claims.user_id, slug, tokenset)
+        token_id = _persist(db, claims.user_id, slug, tokenset)
     except Exception:
         log.exception("oauth callback ref=%s provider=%s: token persist failed", ref, slug)
         db.rollback()
         return _deep_link(slug, reason="server_error", ref=ref)
 
+    # Pull immediately instead of waiting for the 30-minute scheduler tick.
+    # Without this a user finishes the OAuth flow and lands on an app with
+    # nothing in it, with no indication that anything is coming — which reads as
+    # a failed connection. Runs after the response so the redirect back into the
+    # app isn't held open for the length of a first backfill.
+    background.add_task(_sync_after_connect, token_id, slug, ref)
+
     log.info("oauth callback ref=%s provider=%s: connected user=%s", ref, slug, claims.user_id)
     return _deep_link(slug)
 
 
-def _persist(db: Session, user_id: uuid.UUID, slug: str, tokenset: TokenSet) -> None:
+def _sync_after_connect(token_id: uuid.UUID, slug: str, ref: str) -> None:
+    """First sync for a newly connected provider.
+
+    Never raises: this runs detached from the request, and the user is already
+    back in the app. A failure is recorded on the token by `sync_one` and shown
+    on the Sources screen.
+    """
+    from app.jobs.sync import sync_one
+
+    try:
+        written = sync_one(token_id)
+        log.info("first sync ref=%s provider=%s: %d records", ref, slug, written)
+    except Exception:
+        log.exception("first sync ref=%s provider=%s failed", ref, slug)
+
+
+def _persist(db: Session, user_id: uuid.UUID, slug: str, tokenset: TokenSet) -> uuid.UUID:
     row = (
         db.query(OAuthToken)
         .filter(OAuthToken.user_id == user_id, OAuthToken.provider == slug)
@@ -188,6 +212,8 @@ def _persist(db: Session, user_id: uuid.UUID, slug: str, tokenset: TokenSet) -> 
     row.expires_at = tokenset.expires_at
     row.scope = tokenset.scope
     db.commit()
+    db.refresh(row)
+    return row.id
 
 
 class SyncResponse(BaseModel):
