@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct RootView: View {
     @EnvironmentObject var session: SessionStore
@@ -7,7 +8,9 @@ struct RootView: View {
         Group {
             switch session.phase {
             case .loading:
-                ProgressView()
+                ScreenBackground {
+                    ProgressView().tint(Theme.Palette.accent)
+                }
             case .signedOut:
                 WelcomeView()
             case .onboarding:
@@ -19,6 +22,7 @@ struct RootView: View {
                 MainTabView()
             }
         }
+        .preferredColorScheme(.dark)
         .task { await session.bootstrap() }
     }
 }
@@ -26,17 +30,43 @@ struct RootView: View {
 struct MainTabView: View {
     @EnvironmentObject var health: HealthKitManager
 
+    init() {
+        // SwiftUI can't fully style the tab bar, and the translucent default
+        // renders as light grey against this background. UIKit appearance is the
+        // only way to make it match.
+        let appearance = UITabBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor(Theme.Palette.bg)
+        appearance.shadowColor = UIColor(Theme.Palette.line)
+
+        let item = appearance.stackedLayoutAppearance
+        item.normal.iconColor = UIColor(Theme.Palette.textDim)
+        item.normal.titleTextAttributes = [
+            .foregroundColor: UIColor(Theme.Palette.textDim),
+            .font: UIFont.systemFont(ofSize: 10, weight: .heavy),
+        ]
+        item.selected.iconColor = UIColor(Theme.Palette.accent)
+        item.selected.titleTextAttributes = [
+            .foregroundColor: UIColor(Theme.Palette.accent),
+            .font: UIFont.systemFont(ofSize: 10, weight: .heavy),
+        ]
+
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
+
     var body: some View {
         TabView {
             DashboardView()
-                .tabItem { Label("Today", systemImage: "sun.max") }
+                .tabItem { Label("TODAY", systemImage: "bolt.fill") }
             ChatView()
-                .tabItem { Label("Coach", systemImage: "bubble.left.and.bubble.right") }
+                .tabItem { Label("COACH", systemImage: "text.bubble.fill") }
             ConnectionsView()
-                .tabItem { Label("Connect", systemImage: "link") }
+                .tabItem { Label("SOURCES", systemImage: "antenna.radiowaves.left.and.right") }
             ProfileView()
-                .tabItem { Label("Profile", systemImage: "person.crop.circle") }
+                .tabItem { Label("GOAL", systemImage: "target") }
         }
+        .tint(Theme.Palette.accent)
         // Re-arm HealthKit observers on launch for users who already granted
         // access. This never prompts — onboarding owns the one-shot sheet.
         .task { await health.resumeIfAuthorized() }

@@ -8,36 +8,68 @@ struct ConnectionsView: View {
     @State private var busySlug: String?
 
     var body: some View {
-        NavigationStack {
-            List {
-                if let me {
-                    Section("Connected") {
+        ScreenBackground {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Metric.stack) {
+                    header
+                    if let me {
                         ForEach(me.providers) { p in
-                            ProviderTile(
+                            ProviderRowView(
                                 p: p,
                                 isBusy: busySlug == p.slug,
                                 run: { await run(p.slug, $0) }
                             )
                         }
+                    } else if let error {
+                        Panel(accent: Theme.Palette.bad) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                SectionLabel("Couldn't load")
+                                Text(error)
+                                    .font(Theme.Font.body)
+                                    .foregroundStyle(Theme.Palette.textDim)
+                                ActionButton(title: "Retry", filled: false) {
+                                    Task { await load() }
+                                }
+                            }
+                        }
+                    } else {
+                        Panel {
+                            HStack(spacing: 12) {
+                                ProgressView().tint(Theme.Palette.accent)
+                                Text("Checking your connections")
+                                    .font(Theme.Font.caption)
+                                    .foregroundStyle(Theme.Palette.textDim)
+                            }
+                        }
                     }
-                } else if let error {
-                    Text(error).foregroundStyle(.red)
-                } else {
-                    ProgressView()
                 }
+                .padding(.horizontal, Theme.Metric.gutter)
+                .padding(.bottom, 40)
             }
-            .navigationTitle("Connections")
             .refreshable { await load() }
-            .task { await load() }
-            .onReceive(NotificationCenter.default.publisher(for: .providerConnected)) { _ in
-                Task { await load() }
-            }
-            .alert("Connection", isPresented: .constant(notice != nil)) {
-                Button("OK") { notice = nil }
-            } message: {
-                Text(notice ?? "")
-            }
         }
+        .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .providerConnected)) { _ in
+            Task { await load() }
+        }
+        .alert("Connection", isPresented: .constant(notice != nil)) {
+            Button("OK") { notice = nil }
+        } message: {
+            Text(notice ?? "")
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            SectionLabel("Your data")
+            Text("SOURCES")
+                .font(.system(size: 34, weight: .black))
+                .tracking(-0.5)
+                .foregroundStyle(Theme.Palette.text)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
     }
 
     /// Runs a connect/disconnect action, then always reloads so the row reflects
@@ -65,7 +97,7 @@ struct ConnectionsView: View {
     }
 }
 
-private struct ProviderTile: View {
+private struct ProviderRowView: View {
     let p: ProviderRow
     let isBusy: Bool
     /// Runs the given work and surfaces its optional message. Returning nil means
@@ -75,52 +107,72 @@ private struct ProviderTile: View {
     @EnvironmentObject var health: HealthKitManager
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(p.displayName).font(.headline)
-                if let ts = p.lastSyncedAt {
-                    Text("Last sync \(ts.formatted(.relative(presentation: .named)))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if p.connected {
-                    Text("Connected").font(.caption).foregroundStyle(.secondary)
-                } else {
-                    Text("Not connected").font(.caption).foregroundStyle(.secondary)
+        Panel(accent: isLive ? Theme.Palette.accent : nil) {
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(p.displayName.uppercased())
+                        .font(.system(size: 15, weight: .heavy))
+                        .tracking(0.8)
+                        .foregroundStyle(Theme.Palette.text)
+                    status
                 }
-            }
-            Spacer()
-            if isBusy {
-                ProgressView()
-            } else {
-                actionButton
+                Spacer(minLength: 8)
+                if isBusy {
+                    ProgressView().tint(Theme.Palette.accent)
+                } else {
+                    actionControl
+                }
             }
         }
     }
 
+    /// Whether this source is actually delivering data, as opposed to merely
+    /// being marked connected server-side.
+    private var isLive: Bool {
+        if p.slug == "healthkit" { return health.hasData }
+        return p.connected
+    }
+
+    private var status: some View {
+        Group {
+            if let ts = p.lastSyncedAt {
+                Text("Synced \(ts.formatted(.relative(presentation: .named)))")
+                    .foregroundStyle(Theme.Palette.textDim)
+            } else if isLive {
+                Text("Connected")
+                    .foregroundStyle(Theme.Palette.accent)
+            } else {
+                Text("Not connected")
+                    .foregroundStyle(Theme.Palette.textDim)
+            }
+        }
+        .font(Theme.Font.caption)
+    }
+
     @ViewBuilder
-    private var actionButton: some View {
+    private var actionControl: some View {
         if p.slug == "healthkit" {
-            // The server reports HealthKit as "connected" for every user, since
-            // it can't see the device's permission state. What it means locally
-            // is: have we asked, and has anything actually arrived.
+            // The server reports HealthKit as "connected" for every user, since it
+            // can't see the device's permission state. What it means locally is:
+            // have we asked, and has anything actually arrived.
             if health.hasData {
-                Text("Syncing").font(.subheadline).foregroundStyle(.secondary)
+                EmptyView()
             } else if health.didRequestAuthorization {
-                // Asked, but nothing has come through — most likely denied.
-                // HealthKit won't tell us, and re-prompting does nothing, so
-                // point at the only place that can fix it.
-                Button("Open Settings") {
+                // Asked, but nothing came through — most likely denied. HealthKit
+                // won't tell us, and re-prompting does nothing, so point at the
+                // only place that can fix it.
+                SmallButton(title: "Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
                         UIApplication.shared.open(url)
                     }
                 }
             } else {
-                Button("Authorize") {
+                SmallButton(title: "Authorize", emphasis: true) {
                     Task { await run { await health.requestAuthorization(); return nil } }
                 }
             }
         } else if p.connected {
-            Button("Disconnect", role: .destructive) {
+            SmallButton(title: "Disconnect", destructive: true) {
                 Task {
                     await run {
                         try await APIClient.shared.delete("/v1/providers/\(p.slug)")
@@ -129,7 +181,7 @@ private struct ProviderTile: View {
                 }
             }
         } else {
-            Button("Connect") {
+            SmallButton(title: "Connect", emphasis: true) {
                 Task {
                     await run {
                         try await ProviderConnectFlow.shared.connect(providerSlug: p.slug).message
@@ -137,5 +189,36 @@ private struct ProviderTile: View {
                 }
             }
         }
+    }
+}
+
+private struct SmallButton: View {
+    let title: String
+    var emphasis: Bool = false
+    var destructive: Bool = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title.uppercased())
+                .font(.system(size: 12, weight: .heavy))
+                .tracking(1.1)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .foregroundStyle(foreground)
+                .background(emphasis ? Theme.Palette.accent : Color.clear)
+                .overlay(
+                    Rectangle().stroke(
+                        emphasis ? Color.clear : Theme.Palette.line, lineWidth: 1
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
+        }
+        .buttonStyle(PressStyle())
+    }
+
+    private var foreground: Color {
+        if emphasis { return Theme.Palette.bg }
+        return destructive ? Theme.Palette.bad : Theme.Palette.textDim
     }
 }

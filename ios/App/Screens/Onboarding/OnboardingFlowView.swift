@@ -5,10 +5,16 @@ import SwiftUI
 /// This exists because the coach was previously advising against a goal the user
 /// never stated — every new account silently defaulted to "adaptive", and the
 /// only way to change it was a Profile tab nothing pointed at.
+///
+/// Structure note: this was five pushed screens (kind → sport → date → details →
+/// health → trackers). Every answer cost a navigation transition, which made a
+/// two-minute setup feel like a form wizard. It is now two: one screen for the
+/// goal, one for data sources. The conditional race-date field appears inline
+/// rather than as its own step.
 @MainActor
 final class OnboardingModel: ObservableObject {
     enum Step: Hashable {
-        case sport, targetDate, details, health, providers
+        case data
     }
 
     @Published var draft = GoalBody()
@@ -16,30 +22,7 @@ final class OnboardingModel: ObservableObject {
     @Published var isSaving = false
     @Published var error: String?
 
-    /// Race is the only kind that needs a date, so the step is skipped entirely
-    /// for the others rather than shown and ignored.
-    private var stepsAfterSport: [Step] {
-        draft.kind == .race ? [.targetDate, .details, .health, .providers]
-                            : [.details, .health, .providers]
-    }
-
-    func choose(_ kind: GoalKind) {
-        draft.kind = kind
-        if kind != .race { draft.targetDate = nil }
-        path = [.sport]
-    }
-
-    func advance(from step: Step) {
-        let remaining = stepsAfterSport
-        guard let index = remaining.firstIndex(of: step) else {
-            // Coming from `.sport`, which is not in the list.
-            if let next = remaining.first { path.append(next) }
-            return
-        }
-        if index + 1 < remaining.count { path.append(remaining[index + 1]) }
-    }
-
-    /// Persist the goal before the HealthKit step, so a user who abandons at the
+    /// Persist the goal before the data step, so a user who abandons at the
     /// permission sheet still has the thing they came to set.
     func saveGoal() async -> Bool {
         isSaving = true
@@ -79,17 +62,12 @@ struct OnboardingFlowView: View {
 
     var body: some View {
         NavigationStack(path: $model.path) {
-            GoalKindStep(model: model)
-                .navigationDestination(for: OnboardingModel.Step.self) { step in
-                    switch step {
-                    case .sport: SportStep(model: model)
-                    case .targetDate: TargetDateStep(model: model)
-                    case .details: DetailsStep(model: model)
-                    case .health: HealthPrimerStep(model: model, health: health)
-                    case .providers: ProvidersStep(model: model, session: session)
-                    }
+            GoalStep(model: model)
+                .navigationDestination(for: OnboardingModel.Step.self) { _ in
+                    DataStep(model: model, health: health, session: session)
                 }
         }
+        .preferredColorScheme(.dark)
         .alert("Something went wrong", isPresented: .constant(model.error != nil)) {
             Button("OK") { model.error = nil }
         } message: {
@@ -98,268 +76,233 @@ struct OnboardingFlowView: View {
     }
 }
 
-// MARK: - Steps
+// MARK: - Scaffold
 
-private struct StepScaffold<Content: View>: View {
+private struct StepScaffold<Content: View, Footer: View>: View {
+    let step: Int
     let title: String
     let subtitle: String?
     @ViewBuilder var content: () -> Content
+    @ViewBuilder var footer: () -> Footer
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.title2.bold())
-            if let subtitle {
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+        ScreenBackground {
+            VStack(alignment: .leading, spacing: 0) {
+                // Progress is shown as filled bars rather than a page count:
+                // it says how far in you are without implying a long form.
+                HStack(spacing: 5) {
+                    ForEach(1...2, id: \.self) { i in
+                        Rectangle()
+                            .fill(i <= step ? Theme.Palette.accent : Theme.Palette.line)
+                            .frame(height: 3)
+                    }
+                }
+                .padding(.top, 8)
+                .padding(.bottom, 26)
+
+                Text(title)
+                    .font(.system(size: 28, weight: .black))
+                    .tracking(-0.4)
+                    .foregroundStyle(Theme.Palette.text)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(Theme.Font.body)
+                        .foregroundStyle(Theme.Palette.textDim)
+                        .padding(.top, 6)
+                }
+
+                ScrollView {
+                    content().padding(.top, 22)
+                }
+                .scrollIndicators(.hidden)
+
+                footer().padding(.top, 12).padding(.bottom, 20)
             }
+            .padding(.horizontal, Theme.Metric.gutter)
+        }
+        .toolbar(.hidden, for: .navigationBar)
+    }
+}
+
+// MARK: - Step 1: the goal
+
+private struct GoalStep: View {
+    @ObservedObject var model: OnboardingModel
+    @FocusState private var notesFocused: Bool
+    @State private var raceDate = Date().addingTimeInterval(60 * 60 * 24 * 90)
+
+    private let sportColumns = [GridItem(.adaptive(minimum: 104), spacing: 8)]
+
+    var body: some View {
+        StepScaffold(
+            step: 1,
+            title: "What are you training for?",
+            subtitle: "This shapes every plan Will writes for you."
+        ) {
+            VStack(alignment: .leading, spacing: 26) {
+                block("Focus") {
+                    VStack(spacing: 8) {
+                        ForEach(GoalKind.allCases) { kind in
+                            SelectRow(
+                                title: kind.title,
+                                detail: kind.subtitle,
+                                selected: model.draft.kind == kind
+                            ) {
+                                model.draft.kind = kind
+                                if kind != .race { model.draft.targetDate = nil }
+                            }
+                        }
+                    }
+                }
+
+                block("Primary sport") {
+                    LazyVGrid(columns: sportColumns, spacing: 8) {
+                        ForEach(Sport.allCases) { sport in
+                            Chip(
+                                title: sport.title,
+                                selected: model.draft.sport == sport
+                            ) {
+                                model.draft.sport = sport
+                            }
+                        }
+                    }
+                }
+
+                // Inline rather than its own screen — it only applies to one
+                // of the three focus options.
+                if model.draft.kind == .race {
+                    block("Event date") {
+                        DatePicker("", selection: $raceDate, in: Date()...,
+                                   displayedComponents: .date)
+                            .datePickerStyle(.compact)
+                            .labelsHidden()
+                            .tint(Theme.Palette.accent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                block("Anything else? (optional)") {
+                    TextField(
+                        "",
+                        text: Binding(
+                            get: { model.draft.description ?? "" },
+                            set: { model.draft.description = $0.isEmpty ? nil : $0 }
+                        ),
+                        axis: .vertical
+                    )
+                    .placeholder(when: (model.draft.description ?? "").isEmpty) {
+                        Text("Target times, injuries, days you can train")
+                            .foregroundStyle(Theme.Palette.textDim)
+                    }
+                    .focused($notesFocused)
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.Palette.text)
+                    .lineLimit(2...5)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(Theme.Palette.surface)
+                    .overlay(Rectangle().stroke(Theme.Palette.line, lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
+                }
+            }
+            .animation(.spring(response: 0.35, dampingFraction: 0.85),
+                       value: model.draft.kind)
+        } footer: {
+            ActionButton(title: model.isSaving ? "Saving" : "Continue") {
+                notesFocused = false
+                if model.draft.kind == .race {
+                    model.draft.targetDate = CalendarDate.string(from: raceDate)
+                }
+                Task {
+                    if await model.saveGoal() { model.path = [.data] }
+                }
+            }
+            .disabled(model.isSaving)
+            .opacity(model.isSaving ? 0.6 : 1)
+        }
+    }
+
+    private func block<C: View>(_ label: String, @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionLabel(label)
             content()
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
-private struct GoalKindStep: View {
-    @ObservedObject var model: OnboardingModel
+// MARK: - Step 2: data sources
 
-    var body: some View {
-        StepScaffold(title: "What are you training for?",
-                     subtitle: "This shapes every plan Coach writes for you.") {
-            VStack(spacing: 12) {
-                ForEach(GoalKind.allCases) { kind in
-                    Button { model.choose(kind) } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: kind.symbol)
-                                .font(.title3)
-                                .frame(width: 32)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(kind.title).font(.headline)
-                                Text(kind.subtitle)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.footnote)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14)
-                                .fill(Color(.secondarySystemBackground))
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.top, 12)
-        }
-        .navigationTitle("Your goal")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-private struct SportStep: View {
-    @ObservedObject var model: OnboardingModel
-
-    private let columns = [GridItem(.adaptive(minimum: 110), spacing: 12)]
-
-    var body: some View {
-        StepScaffold(title: "Primary sport?", subtitle: "You can log anything — this just sets the focus.") {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(Sport.allCases) { sport in
-                        Button {
-                            model.draft.sport = sport
-                            model.advance(from: .sport)
-                        } label: {
-                            VStack(spacing: 6) {
-                                Image(systemName: sport.symbol).font(.title3)
-                                Text(sport.title).font(.caption).multilineTextAlignment(.center)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 78)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(model.draft.sport == sport
-                                          ? Color.accentColor.opacity(0.18)
-                                          : Color(.secondarySystemBackground))
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.top, 12)
-            }
-        }
-        .navigationTitle("Sport")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-private struct TargetDateStep: View {
-    @ObservedObject var model: OnboardingModel
-    @State private var date = Date().addingTimeInterval(60 * 60 * 24 * 90)
-
-    var body: some View {
-        StepScaffold(title: "When's the event?",
-                     subtitle: "Coach works backwards from this to plan your build.") {
-            DatePicker("Race day", selection: $date, in: Date()..., displayedComponents: .date)
-                .datePickerStyle(.graphical)
-                .padding(.top, 12)
-
-            Button("Continue") {
-                // Stored as a calendar date string, never a Date — see GoalBody.
-                model.draft.targetDate = CalendarDate.string(from: date)
-                model.advance(from: .targetDate)
-            }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
-        }
-        .navigationTitle("Race day")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-private struct DetailsStep: View {
-    @ObservedObject var model: OnboardingModel
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        StepScaffold(title: "Anything else Coach should know?",
-                     subtitle: "Optional. Target times, injuries, how much you can train.") {
-            TextField(
-                "e.g. sub-3:30 marathon, coming back from a calf strain",
-                text: Binding(
-                    get: { model.draft.description ?? "" },
-                    set: { model.draft.description = $0.isEmpty ? nil : $0 }
-                ),
-                axis: .vertical
-            )
-            .lineLimit(3...6)
-            .textFieldStyle(.roundedBorder)
-            .focused($focused)
-            .padding(.top, 12)
-
-            Button {
-                focused = false
-                Task {
-                    if await model.saveGoal() { model.advance(from: .details) }
-                }
-            } label: {
-                if model.isSaving { ProgressView() } else { Text("Continue") }
-            }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
-            .disabled(model.isSaving)
-        }
-        .navigationTitle("Details")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-private struct HealthPrimerStep: View {
+private struct DataStep: View {
     @ObservedObject var model: OnboardingModel
     @ObservedObject var health: HealthKitManager
-
-    var body: some View {
-        StepScaffold(title: "Connect Apple Health",
-                     subtitle: "Coach reads your data — it never writes to Health.") {
-            VStack(alignment: .leading, spacing: 14) {
-                Row("bed.double", "Sleep stages and duration")
-                Row("waveform.path.ecg", "Heart rate and HRV")
-                Row("figure.run", "Workouts and VO₂ max")
-            }
-            .padding(.vertical, 20)
-
-            Text("You'll see the system permission sheet next. You can change this anytime in Settings.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            Spacer()
-
-            // A pre-permission explainer, because the system sheet is one-shot:
-            // deny it and the only route back is Settings. "Not now" skips
-            // without spending that single chance.
-            Button("Allow access") {
-                Task {
-                    await health.requestAuthorization()
-                    model.advance(from: .health)
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
-
-            Button("Not now") { model.advance(from: .health) }
-                .frame(maxWidth: .infinity)
-        }
-        .navigationTitle("Apple Health")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private func Row(_ symbol: String, _ text: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol).frame(width: 26).foregroundStyle(.tint)
-            Text(text)
-        }
-    }
-}
-
-private struct ProvidersStep: View {
-    @ObservedObject var model: OnboardingModel
     let session: SessionStore
+
     @State private var me: MeResponse?
     @State private var connecting: String?
     @State private var notice: String?
 
-    /// Apple Health is handled by the previous step; OAuth providers only here.
+    /// Apple Health is presented separately — it is a device permission, not an
+    /// OAuth connection, and it is the one most users should turn on.
     private var connectable: [ProviderRow] {
         (me?.providers ?? []).filter { $0.slug != "healthkit" && !$0.connected }
     }
 
     var body: some View {
-        StepScaffold(title: "Connect a tracker",
-                     subtitle: "Optional — you can add these later from the Connect tab.") {
-            VStack(spacing: 12) {
-                ForEach(connectable) { p in
-                    Button {
-                        Task { await connect(p.slug) }
-                    } label: {
-                        HStack {
-                            Text(p.displayName).font(.headline)
-                            Spacer()
-                            if connecting == p.slug {
-                                ProgressView()
-                            } else {
-                                Image(systemName: "plus.circle")
+        StepScaffold(
+            step: 2,
+            title: "Where should I get your data?",
+            subtitle: "You can add more later from Sources."
+        ) {
+            VStack(alignment: .leading, spacing: 22) {
+                Panel(accent: health.didRequestAuthorization ? Theme.Palette.accent : nil) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        SectionLabel("Apple Health")
+                        Text("Sleep, heart rate and HRV, workouts and VO₂ max.")
+                            .font(Theme.Font.body)
+                            .foregroundStyle(Theme.Palette.textDim)
+                        Text("Read only. Will never writes to Health.")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Palette.textDim)
+
+                        if health.didRequestAuthorization {
+                            Text("Authorized")
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Palette.accent)
+                        } else {
+                            // Pre-permission explainer, because the system sheet
+                            // is one-shot: deny it and the only route back is
+                            // Settings.
+                            ActionButton(title: "Allow access") {
+                                Task { await health.requestAuthorization() }
                             }
                         }
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14)
-                                .fill(Color(.secondarySystemBackground))
-                        )
                     }
-                    .buttonStyle(.plain)
-                    .disabled(connecting != nil)
+                }
+
+                if !connectable.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SectionLabel("Trackers")
+                        ForEach(connectable) { p in
+                            SelectRow(
+                                title: p.displayName,
+                                detail: connecting == p.slug ? "Opening…" : "Tap to connect",
+                                selected: false
+                            ) {
+                                Task { await connect(p.slug) }
+                            }
+                            .disabled(connecting != nil)
+                        }
+                    }
                 }
             }
-            .padding(.top, 12)
-
-            Spacer()
-
-            Button {
+        } footer: {
+            ActionButton(title: model.isSaving ? "Setting up" : "Start") {
                 Task { await model.complete(session: session) }
-            } label: {
-                if model.isSaving { ProgressView() } else { Text("Finish") }
             }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
             .disabled(model.isSaving)
+            .opacity(model.isSaving ? 0.6 : 1)
         }
-        .navigationTitle("Trackers")
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(model.isSaving)
         .task { me = try? await APIClient.shared.get("/v1/me") }
         .alert("Connection", isPresented: .constant(notice != nil)) {
             Button("OK") { notice = nil }
@@ -375,5 +318,79 @@ private struct ProvidersStep: View {
             notice = error.localizedDescription
         }
         me = try? await APIClient.shared.get("/v1/me")
+    }
+}
+
+// MARK: - Controls
+
+private struct SelectRow: View {
+    let title: String
+    let detail: String?
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.text)
+                    if let detail {
+                        Text(detail)
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Palette.textDim)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+                Spacer(minLength: 8)
+                Rectangle()
+                    .fill(selected ? Theme.Palette.accent : Color.clear)
+                    .overlay(
+                        Rectangle().stroke(
+                            selected ? Theme.Palette.accent : Theme.Palette.line,
+                            lineWidth: 1.5
+                        )
+                    )
+                    .frame(width: 18, height: 18)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.Palette.surface)
+            .overlay(
+                Rectangle().stroke(
+                    selected ? Theme.Palette.accent : Theme.Palette.line,
+                    lineWidth: 1
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
+        }
+        .buttonStyle(PressStyle())
+    }
+}
+
+private struct Chip: View {
+    let title: String
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: .bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .foregroundStyle(selected ? Theme.Palette.bg : Theme.Palette.text)
+                .background(selected ? Theme.Palette.accent : Theme.Palette.surface)
+                .overlay(
+                    Rectangle().stroke(
+                        selected ? Color.clear : Theme.Palette.line, lineWidth: 1
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
+        }
+        .buttonStyle(PressStyle())
     }
 }
