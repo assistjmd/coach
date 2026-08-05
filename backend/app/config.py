@@ -47,6 +47,9 @@ class Settings(BaseSettings):
 
     oura_client_id: str = ""
     oura_client_secret: str = ""
+
+    strava_client_id: str = ""
+    strava_client_secret: str = ""
     # Empty means "derive from public_base_url" — see providers.base.redirect_uri_for.
     oura_redirect_uri: str = ""
 

@@ -24,6 +24,21 @@ final class HealthKitManager: ObservableObject {
     private static let askedKey = "coach.hk.didRequestAuthorization"
     private static let hasDataKey = "coach.hk.hasData"
 
+    /// How far back the first sync reaches.
+    ///
+    /// Without this the initial anchored query has no anchor and no predicate,
+    /// so HealthKit returns the user's entire history — every HRV reading and
+    /// sleep stage since they bought the watch. That was serialised into one
+    /// JSON body and posted as a single request, which hung building it and then
+    /// timed out at the proxy. The coach reasons over recent load anyway; a year
+    /// of 2023 heart-rate samples adds nothing.
+    private static let backfillDays = 90
+
+    /// Maximum records per upload request. The batch is split so one enormous
+    /// first sync becomes several ordinary requests instead of a single one that
+    /// dies at the edge.
+    private static let uploadChunkSize = 400
+
     private let store = HKHealthStore()
     private let anchorsKey = "coach.hk.anchors.v1"
 
@@ -57,8 +72,16 @@ final class HealthKitManager: ObservableObject {
         do {
             let batch = try await fetchDeltas()
             if batch.isEmpty { return }
-            let _: EmptyResp = try await APIClient.shared.postJSON("/v1/ingest/healthkit", body: batch)
+            // Sent in chunks: the first sync after authorization can carry a
+            // quarter's worth of samples, and as one request that body is large
+            // enough to time out at the edge before the server sees it.
+            for chunk in batch.chunked(max: Self.uploadChunkSize) {
+                let _: EmptyResp = try await APIClient.shared.postJSON(
+                    "/v1/ingest/healthkit", body: chunk
+                )
+            }
             lastSync = Date()
+            lastError = nil
             if !hasData {
                 hasData = true
                 UserDefaults.standard.set(true, forKey: Self.hasDataKey)
@@ -236,10 +259,24 @@ final class HealthKitManager: ObservableObject {
     }
 
     private func fetchAnchored(type: HKSampleType, anchor: HKQueryAnchor?) async throws -> ([HKSample], HKQueryAnchor?) {
-        try await withCheckedThrowingContinuation { cont in
+        // Only the *first* query needs bounding. Once an anchor exists HealthKit
+        // returns deltas since that anchor, which is inherently small, and a
+        // predicate would then wrongly exclude backdated samples that arrive
+        // late (a watch syncing after being offline, for instance).
+        let predicate: NSPredicate? = anchor == nil
+            ? HKQuery.predicateForSamples(
+                withStart: Calendar.current.date(
+                    byAdding: .day, value: -Self.backfillDays, to: Date()
+                ),
+                end: nil,
+                options: .strictStartDate
+              )
+            : nil
+
+        return try await withCheckedThrowingContinuation { cont in
             let q = HKAnchoredObjectQuery(
                 type: type,
-                predicate: nil,
+                predicate: predicate,
                 anchor: anchor,
                 limit: HKObjectQueryNoLimit
             ) { _, samples, _, newAnchor, error in
@@ -290,6 +327,35 @@ struct HealthKitBatch: Encodable {
 
     var isEmpty: Bool {
         workouts.isEmpty && sleep.isEmpty && hrv.isEmpty && heart_rate.isEmpty && body_metrics.isEmpty
+    }
+
+    /// Split into batches of at most `max` records each.
+    ///
+    /// Each chunk is a complete, independently valid payload, so a failure part
+    /// way through leaves the earlier chunks already ingested rather than losing
+    /// the whole sync. Ingest is idempotent on `source_record_id`, so a retry
+    /// re-sending an accepted chunk is harmless.
+    func chunked(max: Int) -> [HealthKitBatch] {
+        var out: [HealthKitBatch] = []
+        var current = HealthKitBatch()
+        var count = 0
+
+        func flushIfFull() {
+            if count >= max {
+                out.append(current)
+                current = HealthKitBatch()
+                count = 0
+            }
+        }
+
+        for w in workouts { current.workouts.append(w); count += 1; flushIfFull() }
+        for s in sleep { current.sleep.append(s); count += 1; flushIfFull() }
+        for h in hrv { current.hrv.append(h); count += 1; flushIfFull() }
+        for h in heart_rate { current.heart_rate.append(h); count += 1; flushIfFull() }
+        for b in body_metrics { current.body_metrics.append(b); count += 1; flushIfFull() }
+
+        if !current.isEmpty { out.append(current) }
+        return out
     }
 }
 
