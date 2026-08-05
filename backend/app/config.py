@@ -7,6 +7,24 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    @field_validator("*", mode="before")
+    @classmethod
+    def _strip_whitespace(cls, v: object) -> object:
+        """Trim surrounding whitespace from every string setting.
+
+        A single leading space on ANTHROPIC_API_KEY cost hours: httpx rejects a
+        header value that starts with a space, raising LocalProtocolError before
+        any request is made, and the Anthropic SDK wraps that as
+        APIConnectionError. So a stray character in a secret presented as a
+        network outage, and the same misleading symptom appeared in both the
+        daily brief and chat.
+
+        Secrets get whitespace easily — a trailing newline when piped, a space
+        after `=` in an .env file, an editor reformatting on paste. None of that
+        should reach an HTTP header.
+        """
+        return v.strip() if isinstance(v, str) else v
+
     database_url: str
 
     @field_validator("database_url")
