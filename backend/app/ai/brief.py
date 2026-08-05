@@ -43,6 +43,13 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
                     f"  training_prescription - your call for today, specific enough to act on "
                     f"(sets, duration, intensity). State it in the first person.\n"
                     f"  rationale - one sentence on why. Not a paragraph.\n"
+                    f"  readiness_score - integer 0-100 matching your read above. "
+                    f"Under 40 is poor, 40-64 moderate, 65+ good. The app colours "
+                    f"the day by this, so it must agree with what you wrote.\n"
+                    f"  session_planned - true if you are asking for a training "
+                    f"session today, false if you are prescribing rest. Be honest: "
+                    f"this decides whether a day with no workout counts as a missed "
+                    f"session or as following instructions.\n"
                     f"  flags - object with boolean keys such as 'illness_risk', 'overreaching'.\n"
                     f"Each string is prose in your normal voice. No headers, no bullets, no "
                     f"sign-off.\n\n"
@@ -69,6 +76,15 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
     brief.training_prescription = parsed.get("training_prescription", "")
     brief.rationale = parsed.get("rationale")
     brief.flags = parsed.get("flags")
+    # Clamped rather than trusted: the model occasionally returns a score outside
+    # the range it was given, and an out-of-range value would break the colour
+    # scale rather than merely being wrong.
+    score = parsed.get("readiness_score")
+    brief.readiness_score = (
+        min(max(int(score), 0), 100) if isinstance(score, (int, float)) else None
+    )
+    planned = parsed.get("session_planned")
+    brief.session_planned = planned if isinstance(planned, bool) else None
     brief.model = cfg.anthropic_model_default
     db.commit()
     db.refresh(brief)

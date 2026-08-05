@@ -10,6 +10,7 @@ from app.routes import chat as chat_routes
 from app.routes import dashboard as dashboard_routes
 from app.routes import goal as goal_routes
 from app.routes import ingest as ingest_routes
+from app.routes import insights as insights_routes
 from app.routes import me as me_routes
 from app.routes import providers as provider_routes
 
@@ -32,6 +33,7 @@ app.include_router(ingest_routes.router)
 app.include_router(dashboard_routes.router)
 app.include_router(chat_routes.router)
 app.include_router(goal_routes.router)
+app.include_router(insights_routes.router)
 
 if settings().app_env == "dev":
     from app.routes import dev as dev_routes
