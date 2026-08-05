@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     anthropic_model_default: str = "claude-sonnet-4-6"
     anthropic_model_cheap: str = "claude-haiku-4-5-20251001"
 
+    # Chat is the only unbounded cost in the app: the daily brief runs once per
+    # user per day, but nothing stops someone using the coach as a general
+    # chatbot. Capped per rolling 24h, and run on the cheap model — the brief
+    # keeps the better one, since it is the output that actually matters and it
+    # is generated once.
+    chat_daily_message_limit: int = 25
+    chat_max_output_tokens: int = 700
+
     oura_client_id: str = ""
     oura_client_secret: str = ""
     # Empty means "derive from public_base_url" — see providers.base.redirect_uri_for.

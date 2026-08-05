@@ -39,8 +39,11 @@ def stream_chat(db: Session, user: User, message: str) -> Iterator[str]:
         msgs.append({"role": "user", "content": message})
 
     with client.messages.stream(
-        model=cfg.anthropic_model_default,
-        max_tokens=1200,
+        # Chat runs on the cheap model deliberately. It is the only unbounded
+        # call in the app, and the answers are short; the daily brief keeps the
+        # stronger model because it runs once and is the output that matters.
+        model=cfg.anthropic_model_cheap,
+        max_tokens=cfg.chat_max_output_tokens,
         system=[
             {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}},
             {

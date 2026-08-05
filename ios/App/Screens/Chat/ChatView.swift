@@ -30,6 +30,9 @@ struct ChatView: View {
                         .padding(.horizontal, Theme.Metric.gutter)
                         .padding(.vertical, 20)
                     }
+                    // Swiping the transcript puts the keyboard away, which is
+                    // what most people reach for first.
+                    .scrollDismissesKeyboard(.interactively)
                     .onChange(of: messages.count) { _, _ in
                         if let last = messages.last {
                             withAnimation(.easeOut(duration: 0.25)) {
@@ -39,6 +42,19 @@ struct ChatView: View {
                     }
                 }
                 composer
+            }
+        }
+        // Belt and braces: tapping anywhere outside the field also dismisses.
+        // Without both of these the keyboard was a dead end — there was no
+        // gesture and no button that put it away.
+        .contentShape(Rectangle())
+        .onTapGesture { inputFocused = false }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { inputFocused = false }
+                    .font(Theme.Font.button)
+                    .tint(Theme.Palette.accent)
             }
         }
     }
@@ -147,6 +163,12 @@ struct ChatView: View {
             for try await chunk in ChatStream.stream(message: text) {
                 messages[assistantIndex].content += chunk
             }
+        } catch APIError.http(429, let detail) {
+            // Quota. The server's sentence is already user-facing, so show it
+            // rather than wrapping it in an error frame.
+            messages[assistantIndex].content = detail
+        } catch APIError.http(_, let detail) where !detail.isEmpty {
+            messages[assistantIndex].content = detail
         } catch {
             messages[assistantIndex].content =
                 "Couldn't reach the coach. \(error.localizedDescription)"

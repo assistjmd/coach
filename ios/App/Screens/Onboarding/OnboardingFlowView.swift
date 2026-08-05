@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Post-sign-in onboarding: state a goal, prime HealthKit, connect a tracker.
 ///
@@ -115,12 +116,29 @@ private struct StepScaffold<Content: View, Footer: View>: View {
                     content().padding(.top, 22)
                 }
                 .scrollIndicators(.hidden)
+                .scrollDismissesKeyboard(.interactively)
 
                 footer().padding(.top, 12).padding(.bottom, 20)
             }
             .padding(.horizontal, Theme.Metric.gutter)
         }
         .toolbar(.hidden, for: .navigationBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    // No @FocusState here — the fields own theirs. Resigning
+                    // first responder globally is simpler than threading a
+                    // binding through the scaffold for one button.
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil, from: nil, for: nil
+                    )
+                }
+                .font(Theme.Font.button)
+                .tint(Theme.Palette.accent)
+            }
+        }
     }
 }
 

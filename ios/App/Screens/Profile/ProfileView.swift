@@ -5,6 +5,7 @@ struct ProfileView: View {
     @State private var goal = GoalBody()
     @State private var loaded = false
     @State private var saveState: SaveState = .idle
+    @FocusState private var notesFocused: Bool
 
     private enum SaveState: Equatable {
         case idle, saving, saved, failed(String)
@@ -33,6 +34,15 @@ struct ProfileView: View {
                 }
                 .padding(.horizontal, Theme.Metric.gutter)
                 .padding(.bottom, 40)
+            }
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { notesFocused = false }
+                    .font(Theme.Font.button)
+                    .tint(Theme.Palette.accent)
             }
         }
         .task {
@@ -98,6 +108,7 @@ struct ProfileView: View {
                         Text("Sub-20 5k without wrecking my knees")
                             .foregroundStyle(Theme.Palette.textDim)
                     }
+                    .focused($notesFocused)
                     .font(Theme.Font.body)
                     .foregroundStyle(Theme.Palette.text)
                     .lineLimit(2...5)
