@@ -36,11 +36,16 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
             {
                 "role": "user",
                 "content": (
-                    f"Today is {target_day.isoformat()}. Based on the data below, produce a JSON "
-                    f"object with keys: readiness_summary (string, 2-3 sentences), "
-                    f"training_prescription (string, what to do today), rationale (string), "
-                    f"flags (object with boolean keys like 'illness_risk', 'overreaching'). "
-                    f"Return ONLY the JSON, no prose around it.\n\n"
+                    f"Today is {target_day.isoformat()}. Using the data below, return ONLY a "
+                    f"JSON object, no prose around it, with these keys:\n"
+                    f"  readiness_summary  - what you noticed. One or two sentences. Lead with "
+                    f"the thing that changed, not a greeting.\n"
+                    f"  training_prescription - your call for today, specific enough to act on "
+                    f"(sets, duration, intensity). State it in the first person.\n"
+                    f"  rationale - one sentence on why. Not a paragraph.\n"
+                    f"  flags - object with boolean keys such as 'illness_risk', 'overreaching'.\n"
+                    f"Each string is prose in your normal voice. No headers, no bullets, no "
+                    f"sign-off.\n\n"
                     f"DATA:\n{json.dumps(snap, default=str)}"
                 ),
             }
