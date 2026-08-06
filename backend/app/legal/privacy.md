@@ -1,12 +1,12 @@
 # Privacy Policy
 
-**Effective date:** [DATE]
-**Last updated:** [DATE]
+**Effective date:** 8/6/2026
+**Last updated:** 8/6/2026
 
-Coach Will ("we", "us") is operated by [LEGAL ENTITY NAME], [ADDRESS]. This
+Coach Will ("we", "us") is operated by Jacob Dudley, PO Box 990148 Boston MA 02199. This
 policy explains what we collect, why, and what you can do about it.
 
-Contact for any privacy question or request: **[PRIVACY EMAIL]**
+Contact for any privacy question or request: jdudley7060@gmail.com
 
 ## What we collect
 
@@ -88,7 +88,7 @@ and UK) or the CCPA/CPRA (California), including the right to object to
 processing and the right not to be discriminated against for exercising a right.
 We do not sell personal information as those laws define it.
 
-To exercise any of these, email **[PRIVACY EMAIL]**. We respond within 30 days.
+To exercise any of these, email jdudley7060@gmail.com. We respond within 30 days.
 
 ## Children
 
@@ -110,6 +110,6 @@ will notify you in the app before they take effect.
 
 ## Contact
 
-[LEGAL ENTITY NAME]
-[ADDRESS]
-[PRIVACY EMAIL]
+Jacob Dudley
+PO Box 990148 Boston MA 02199
+jdudley7060@gmail.com

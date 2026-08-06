@@ -1,9 +1,9 @@
 # Terms of Use
 
-**Effective date:** [DATE]
-**Last updated:** [DATE]
+**Effective date:** 8/6/2026
+**Last updated:** 8/6/2026
 
-These terms are a binding agreement between you and [LEGAL ENTITY NAME] ("we",
+These terms are a binding agreement between you and Jacob Dudley ("we",
 "us") governing your use of the Coach Will app and service. By creating an
 account you accept them. If you do not accept them, do not use the service.
 
@@ -51,7 +51,7 @@ guardian's permission.
 ## 4. Your account
 
 You are responsible for activity under your account. Sign in with Apple secures
-it; keep your Apple ID secure. Tell us promptly at [SUPPORT EMAIL] if you believe
+it; keep your Apple ID secure. Tell us promptly at jdudley7060@gmail.com if you believe
 your account has been accessed without permission.
 
 You may delete your account at any time from within the app.
@@ -116,10 +116,10 @@ these limits apply only to the extent permitted.
 
 ## 11. Indemnification
 
-You agree to indemnify and hold harmless [LEGAL ENTITY NAME], its officers,
-employees and contractors, from any claim, loss, liability or expense (including
-reasonable legal fees) arising from your use of the service, your breach of these
-terms, or your violation of any law or third-party right.
+You agree to indemnify and hold harmless Jacob Dudley and any contractors or
+agents acting on his behalf, from any claim, loss, liability or expense
+(including reasonable legal fees) arising from your use of the service, your
+breach of these terms, or your violation of any law or third-party right.
 
 ## 12. Intellectual property
 
@@ -136,13 +136,10 @@ the service after a change takes effect means you accept it.
 
 ## 14. Governing law and disputes
 
-These terms are governed by the laws of [STATE/COUNTRY], without regard to
-conflict-of-laws rules. Any dispute will be resolved in the courts of
-[JURISDICTION], and you consent to their jurisdiction.
-
-[OPTIONAL — DISCUSS WITH COUNSEL: arbitration clause and class-action waiver.
-These materially change users' rights, are unenforceable in some jurisdictions,
-and should not be added without legal advice.]
+These terms are governed by the laws of the Commonwealth of Massachusetts,
+United States, without regard to conflict-of-laws rules. Any dispute will be
+resolved in the state or federal courts located in Massachusetts, and you
+consent to their jurisdiction.
 
 ## 15. Severability and entire agreement
 
@@ -151,6 +148,6 @@ and the Privacy Policy are the entire agreement between us regarding the service
 
 ## Contact
 
-[LEGAL ENTITY NAME]
-[ADDRESS]
-[SUPPORT EMAIL]
+Jacob Dudley
+PO Box 990148 Boston MA 02199
+jdudley7060@gmail.com
