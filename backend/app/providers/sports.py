@@ -88,9 +88,13 @@ OURA_SPORT: dict[str, Sport] = {
 # on the iOS side); this is here so ingest validates against the same set.
 HEALTHKIT_SPORT: dict[str, Sport] = {s: s for s in SPORTS}
 
-# Fitbit `activityName` values. Free-text and inconsistently capitalised — the
-# same ride comes back as "Bike" from a tracker and "Outdoor Bike" from the app —
-# so `normalize` lowercases before falling back.
+# Fitbit activity names. Kept for the Google Health API integration — Fitbit
+# devices still report these strings, they now arrive through Google's endpoints
+# rather than Fitbit's own, which shuts down in September 2026.
+#
+# Free-text and inconsistently capitalised: the same ride is "Bike" from a
+# tracker and "Outdoor Bike" from the app, so `normalize` lowercases before
+# falling back.
 FITBIT_SPORT: dict[str, Sport] = {
     "Run": "running",
     "Treadmill": "running",

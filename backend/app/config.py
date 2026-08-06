@@ -69,8 +69,10 @@ class Settings(BaseSettings):
     strava_client_id: str = ""
     strava_client_secret: str = ""
 
-    fitbit_client_id: str = ""
-    fitbit_client_secret: str = ""
+    # Fitbit's own Web API is turned down in September 2026; its replacement is
+    # the Google Health API, which uses Google OAuth rather than Fitbit's.
+    google_health_client_id: str = ""
+    google_health_client_secret: str = ""
     # Empty means "derive from public_base_url" — see providers.base.redirect_uri_for.
     oura_redirect_uri: str = ""
 

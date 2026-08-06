@@ -1,6 +1,5 @@
 from app.config import settings
 from app.providers.base import Provider
-from app.providers.fitbit import FitbitProvider
 from app.providers.healthkit import HealthKitProvider
 from app.providers.oura import OuraProvider
 from app.providers.strava import StravaProvider
@@ -8,7 +7,6 @@ from app.providers.strava import StravaProvider
 _PROVIDERS: dict[str, Provider] = {
     "oura": OuraProvider(),
     "strava": StravaProvider(),
-    "fitbit": FitbitProvider(),
     "healthkit": HealthKitProvider(),
 }
 
