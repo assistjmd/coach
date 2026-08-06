@@ -88,6 +88,33 @@ OURA_SPORT: dict[str, Sport] = {
 # on the iOS side); this is here so ingest validates against the same set.
 HEALTHKIT_SPORT: dict[str, Sport] = {s: s for s in SPORTS}
 
+# Fitbit `activityName` values. Free-text and inconsistently capitalised — the
+# same ride comes back as "Bike" from a tracker and "Outdoor Bike" from the app —
+# so `normalize` lowercases before falling back.
+FITBIT_SPORT: dict[str, Sport] = {
+    "Run": "running",
+    "Treadmill": "running",
+    "Outdoor Run": "running",
+    "Trail Run": "trail_running",
+    "Bike": "cycling",
+    "Outdoor Bike": "cycling",
+    "Spinning": "indoor_cycling",
+    "Mountain Bike": "mtb",
+    "Swim": "swimming",
+    "Rowing": "rowing",
+    "Weights": "strength",
+    "Weightlifting": "strength",
+    "Interval Workout": "strength",
+    "Bootcamp": "strength",
+    "Circuit Training": "strength",
+    "Walk": "walking",
+    "Hike": "hiking",
+    "Yoga": "yoga",
+    "Elliptical": "other",
+    "Sport": "other",
+    "Workout": "other",
+}
+
 
 def normalize(value: str | None, mapping: dict[str, Sport]) -> Sport:
     """Map a provider's sport name onto the canonical set.
