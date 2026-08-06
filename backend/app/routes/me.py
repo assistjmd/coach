@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -9,6 +10,8 @@ from app.auth.deps import current_user
 from app.db import get_db
 from app.models import LegalConsent, OAuthToken, User
 from app.providers import all_providers
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["me"])
 
@@ -65,6 +68,40 @@ def _me(user: User, db: Session) -> MeResponse:
         onboarded=user.onboarded_at is not None,
         providers=providers,
     )
+
+
+class TimezoneBody(BaseModel):
+    timezone: str
+
+    @field_validator("timezone")
+    @classmethod
+    def _known_zone(cls, v: str) -> str:
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError) as e:
+            raise ValueError(f"unknown timezone: {v}") from e
+        return v
+
+
+@router.put("/me/timezone", response_model=MeResponse)
+def set_timezone(
+    body: TimezoneBody,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> MeResponse:
+    """Keep the stored timezone matching the device.
+
+    It was previously written once, at onboarding, and never again — so someone
+    who moved, or who onboarded while travelling, kept getting their brief at the
+    wrong local hour forever with no way to correct it.
+    """
+    if user.timezone != body.timezone:
+        log.info("timezone changed for user %s: %s -> %s",
+                 user.id, user.timezone, body.timezone)
+        user.timezone = body.timezone
+        db.commit()
+        db.refresh(user)
+    return _me(user, db)
 
 
 @router.get("/me", response_model=MeResponse)

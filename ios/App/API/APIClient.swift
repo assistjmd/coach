@@ -113,6 +113,29 @@ final class APIClient {
 
     private struct EmptyResponse: Decodable {}
 
+    /// Build a request URL from a path that may carry a query string.
+    ///
+    /// `appendingPathComponent` treats everything it is given as one path
+    /// segment, so "/v1/x?a=1" became "/v1/x%3Fa%3D1" and 404'd. Nothing had a
+    /// query string until the insights calendar, which is why this survived.
+    func url(for path: String) throws -> URL {
+        let (rawPath, query) = split(path)
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent(rawPath), resolvingAgainstBaseURL: false
+        )
+        components?.percentEncodedQuery = query
+        guard let built = components?.url else {
+            throw APIError.http(0, "could not build URL for \(path)")
+        }
+        return built
+    }
+
+    private func split(_ path: String) -> (path: String, query: String?) {
+        guard let mark = path.firstIndex(of: "?") else { return (path, nil) }
+        return (String(path[path.startIndex..<mark]),
+                String(path[path.index(after: mark)...]))
+    }
+
     private func request<R: Decodable>(_ path: String, method: String, body: [String: Any]?) async throws -> R {
         var req = try makeRequest(path: path, method: method)
         if let body {
@@ -123,7 +146,7 @@ final class APIClient {
     }
 
     private func makeRequest(path: String, method: String) throws -> URLRequest {
-        var req = URLRequest(url: baseURL.appendingPathComponent(path))
+        var req = URLRequest(url: try url(for: path))
         req.httpMethod = method
         if let token = Keychain.read("coach.access_token") {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

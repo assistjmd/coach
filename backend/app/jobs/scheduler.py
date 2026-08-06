@@ -21,9 +21,17 @@ def start() -> BackgroundScheduler:
         return _scheduler
     s = BackgroundScheduler(timezone="UTC")
     s.add_job(sync_all, IntervalTrigger(minutes=30), id="sync_all", max_instances=1)
-    s.add_job(run_for_all_users, CronTrigger(hour=10, minute=0), id="daily_brief", max_instances=1)
+    # Hourly, not daily. The job itself decides who is due, by checking whether
+    # it is currently the target hour in each user's own timezone — a single
+    # fixed UTC time delivered a "morning" brief at 3am in California.
+    s.add_job(
+        run_for_all_users,
+        CronTrigger(minute=5),
+        id="daily_brief",
+        max_instances=1,
+    )
     s.start()
-    log.info("scheduler started: sync every 30m, daily brief at 10:00 UTC")
+    log.info("scheduler started: sync every 30m, brief check hourly")
     _scheduler = s
     return s
 

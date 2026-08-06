@@ -33,6 +33,24 @@ final class SessionStore: ObservableObject {
     /// nothing in the app ever noticed — every screen would just show its own
     /// error string forever. Asking `/v1/me` gives us both the onboarding state
     /// and a real 401 check in one round trip.
+    /// Keep the server's idea of the user's timezone matching the device.
+    ///
+    /// It was written once at onboarding and never again, so anyone who moved —
+    /// or who signed up while travelling — kept getting their brief at the wrong
+    /// local hour permanently. Checked on every launch, sent only on a change, so
+    /// this is normally zero requests.
+    ///
+    /// Failures are ignored on purpose: a wrong timezone is a minor annoyance,
+    /// and it must never be the reason someone can't open the app.
+    private func syncTimezoneIfChanged(stored: String) async {
+        let device = TimeZone.current.identifier
+        guard device != stored else { return }
+        struct Empty: Decodable {}
+        _ = try? await APIClient.shared.put(
+            "/v1/me/timezone", body: ["timezone": device]
+        ) as Empty
+    }
+
     func bootstrap() async {
         guard accessToken != nil else {
             phase = .signedOut
@@ -43,6 +61,7 @@ final class SessionStore: ObservableObject {
             userId = me.id
             Keychain.write(userIdKey, value: me.id)
             phase = me.onboarded ? .ready : .onboarding
+            await syncTimezoneIfChanged(stored: me.timezone)
         } catch APIError.http(401, _) {
             // The token is no longer good. Clear it rather than leaving the app
             // in a state where every request fails.
