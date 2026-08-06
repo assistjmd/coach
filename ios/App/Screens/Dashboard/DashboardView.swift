@@ -7,6 +7,9 @@ struct DashboardView: View {
     /// Drives the entrance animation. Panels settle in rather than snapping,
     /// which is most of what makes the UI feel physical.
     @State private var appeared = false
+    /// Local tick state so a tap fills the box immediately rather than after a
+    /// round trip.
+    @State private var ticked: Set<String> = []
 
     enum LoadState: Equatable {
         case loading
@@ -147,12 +150,55 @@ struct DashboardView: View {
         .opacity(appeared ? 1 : 0)
 
         Panel {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 14) {
                 SectionLabel("Today's session")
                 Text(b.trainingPrescription)
                     .font(Theme.Font.bodyStrong)
                     .lineSpacing(3)
                     .foregroundStyle(Theme.Palette.text)
+
+                if !b.sessionItems.isEmpty {
+                    Rectangle().fill(Theme.Palette.line).frame(height: 1)
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(b.sessionItems) { item in
+                            Button { toggle(item.id, day: b.day) } label: {
+                                HStack(alignment: .top, spacing: 12) {
+                                    ZStack {
+                                        Rectangle()
+                                            .fill(ticked.contains(item.id)
+                                                  ? Theme.Palette.accent : Color.clear)
+                                            .overlay(
+                                                Rectangle().stroke(
+                                                    ticked.contains(item.id)
+                                                        ? Theme.Palette.accent
+                                                        : Theme.Palette.line,
+                                                    lineWidth: 1.5
+                                                )
+                                            )
+                                            .frame(width: 20, height: 20)
+                                        if ticked.contains(item.id) {
+                                            Text("✓")
+                                                .font(.system(size: 13, weight: .black))
+                                                .foregroundStyle(Theme.Palette.bg)
+                                        }
+                                    }
+                                    Text(item.text)
+                                        .font(Theme.Font.body)
+                                        .multilineTextAlignment(.leading)
+                                        .foregroundStyle(
+                                            ticked.contains(item.id)
+                                                ? Theme.Palette.textDim : Theme.Palette.text
+                                        )
+                                        .strikethrough(ticked.contains(item.id),
+                                                       color: Theme.Palette.textDim)
+                                    Spacer(minLength: 0)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
             }
         }
         .offset(y: appeared ? 0 : 16)
@@ -174,9 +220,28 @@ struct DashboardView: View {
 
     // MARK: Load
 
+    /// Optimistic: flip the box, then tell the server. A failed write is
+    /// reverted rather than left showing a tick that was never saved.
+    private func toggle(_ id: String, day: String) {
+        let before = ticked
+        if ticked.contains(id) { ticked.remove(id) } else { ticked.insert(id) }
+        let payload = Array(ticked)
+        Task {
+            struct Ignored: Decodable {}
+            do {
+                let _: Ignored = try await APIClient.shared.put(
+                    "/v1/insights/day/\(day)/log", body: ["completed_items": payload]
+                )
+            } catch {
+                ticked = before
+            }
+        }
+    }
+
     private func load() async {
         do {
             brief = try await APIClient.shared.get("/v1/dashboard/today")
+            ticked = Set(brief?.completedItems ?? [])
             state = .loaded
         } catch APIError.http(404, _) {
             state = .empty
@@ -195,4 +260,6 @@ struct TodayBrief: Decodable {
     let rationale: String?
     /// True when the server served an older brief rather than today's.
     let stale: Bool
+    let sessionItems: [SessionItem]
+    let completedItems: [String]
 }

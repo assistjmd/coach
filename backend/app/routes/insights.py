@@ -15,7 +15,7 @@ from app.analytics import compliance as comp
 from app.analytics.load import daily_loads
 from app.auth.deps import current_user
 from app.db import get_db
-from app.models import DailyBrief, User, Workout
+from app.models import DailyBrief, DayLog, User, Workout
 
 router = APIRouter(prefix="/v1/insights", tags=["insights"])
 
@@ -32,6 +32,11 @@ class WorkoutSummary(BaseModel):
     source: str
 
 
+class SessionItem(BaseModel):
+    id: str
+    text: str
+
+
 class DayEntry(BaseModel):
     day: date
     load: float
@@ -46,6 +51,10 @@ class DayEntry(BaseModel):
     # than presenting their own edit back to them as a judgement.
     corrected: bool
     workouts: list[WorkoutSummary]
+    # The prescription split into tickable pieces, plus which the athlete ticked.
+    session_items: list[SessionItem]
+    completed_items: list[str]
+    journal: str | None
 
 
 class CalendarResponse(BaseModel):
@@ -59,6 +68,74 @@ class CalendarResponse(BaseModel):
 
 class ComplianceUpdate(BaseModel):
     compliance: Literal["complete", "partial", "missed", "rest"]
+
+
+class DayLogUpdate(BaseModel):
+    journal: str | None = None
+    completed_items: list[str] | None = None
+
+
+def _entry(
+    day: date,
+    brief: DailyBrief | None,
+    log: DayLog | None,
+    load: float,
+    method: str,
+    workouts: list[Workout],
+    fallback_status: str,
+) -> DayEntry:
+    """Assemble one day. Single builder so the three endpoints that return a
+    DayEntry cannot drift apart in what they include."""
+    completed = list(log.completed_items or []) if log else []
+    return DayEntry(
+        day=day,
+        load=load,
+        load_method=method,
+        readiness=brief.readiness_score if brief else None,
+        prescription=brief.training_prescription if brief else None,
+        session_planned=brief.session_planned if brief else None,
+        compliance=comp.resolve(brief, completed) if brief else fallback_status,
+        corrected=bool(brief and brief.compliance_override),
+        workouts=[
+            WorkoutSummary(
+                sport=w.sport,
+                duration_s=w.duration_s,
+                distance_m=w.distance_m,
+                avg_hr=w.avg_hr,
+                source=w.source,
+            )
+            for w in workouts
+        ],
+        session_items=[
+            SessionItem(id=i["id"], text=i["text"])
+            for i in (brief.session_items or [])
+            if isinstance(i, dict) and i.get("id") and i.get("text")
+        ] if brief else [],
+        completed_items=completed,
+        journal=log.journal if log else None,
+    )
+
+
+def _day_context(db: Session, user: User, day: date):
+    """Everything one day needs, for the single-day endpoints."""
+    brief = (
+        db.query(DailyBrief)
+        .filter(DailyBrief.user_id == user.id, DailyBrief.day == day)
+        .one_or_none()
+    )
+    log = (
+        db.query(DayLog)
+        .filter(DayLog.user_id == user.id, DayLog.day == day)
+        .one_or_none()
+    )
+    load, method = daily_loads(db, user.id, day, day).get(day, (0.0, "trimp"))
+    workouts = (
+        db.query(Workout)
+        .filter(Workout.user_id == user.id, func.date(Workout.started_at) == day)
+        .order_by(Workout.started_at)
+        .all()
+    )
+    return brief, log, load, method, workouts
 
 
 @router.get("/calendar", response_model=CalendarResponse)
@@ -83,6 +160,13 @@ def calendar(
             DailyBrief.user_id == user.id,
             DailyBrief.day >= start,
             DailyBrief.day <= end,
+        )
+    }
+
+    logs = {
+        entry.day: entry
+        for entry in db.query(DayLog).filter(
+            DayLog.user_id == user.id, DayLog.day >= start, DayLog.day <= end
         )
     }
 
@@ -118,25 +202,14 @@ def calendar(
             brief.compliance_auto = auto
 
         days.append(
-            DayEntry(
+            _entry(
                 day=cursor,
+                brief=brief,
+                log=logs.get(cursor),
                 load=load,
-                load_method=method,
-                readiness=brief.readiness_score if brief else None,
-                prescription=brief.training_prescription if brief else None,
-                session_planned=brief.session_planned if brief else None,
-                compliance=comp.resolve(brief) if brief else auto,
-                corrected=bool(brief and brief.compliance_override),
-                workouts=[
-                    WorkoutSummary(
-                        sport=w.sport,
-                        duration_s=w.duration_s,
-                        distance_m=w.distance_m,
-                        avg_hr=w.avg_hr,
-                        source=w.source,
-                    )
-                    for w in workouts_by_day.get(cursor, [])
-                ],
+                method=method,
+                workouts=workouts_by_day.get(cursor, []),
+                fallback_status=auto,
             )
         )
         cursor += timedelta(days=1)
@@ -185,34 +258,42 @@ def correct_compliance(
     brief.compliance_override = body.compliance
     db.commit()
 
-    loads = daily_loads(db, user.id, day, day)
-    load, method = loads.get(day, (0.0, "trimp"))
-    workouts = (
-        db.query(Workout)
-        .filter(
-            Workout.user_id == user.id,
-            func.date(Workout.started_at) == day,
-        )
-        .order_by(Workout.started_at)
-        .all()
-    )
-    return DayEntry(
-        day=day,
-        load=load,
-        load_method=method,
-        readiness=brief.readiness_score,
-        prescription=brief.training_prescription,
-        session_planned=brief.session_planned,
-        compliance=comp.resolve(brief),
-        corrected=True,
-        workouts=[
-            WorkoutSummary(
-                sport=w.sport,
-                duration_s=w.duration_s,
-                distance_m=w.distance_m,
-                avg_hr=w.avg_hr,
-                source=w.source,
-            )
-            for w in workouts
-        ],
-    )
+    _, log, load, method, workouts = _day_context(db, user, day)
+    return _entry(day, brief, log, load, method, workouts, "unknown")
+
+
+@router.put("/day/{day}/log", response_model=DayEntry)
+def update_log(
+    day: date,
+    body: DayLogUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> DayEntry:
+    """Record what actually happened: the athlete's note, and which prescribed
+    items they ticked off.
+
+    Works on any day, including ones with no brief — a session done before they
+    installed the app still deserves a journal entry. Fields are updated only
+    when present, so saving a note cannot silently clear the checkboxes.
+    """
+    brief, log, load, method, workouts = _day_context(db, user, day)
+    if log is None:
+        log = DayLog(user_id=user.id, day=day)
+        db.add(log)
+
+    if body.journal is not None:
+        # Empty string means "cleared", which is distinct from "not sent".
+        log.journal = body.journal.strip() or None
+    if body.completed_items is not None:
+        valid = {
+            i["id"] for i in (brief.session_items or [])
+            if isinstance(i, dict) and i.get("id")
+        } if brief else set()
+        # Drop ids that no longer exist. A regenerated brief can rename or remove
+        # an item, and keeping a stale id would inflate the completion count
+        # against a checkbox nobody can see.
+        log.completed_items = [i for i in body.completed_items if i in valid]
+    db.commit()
+    db.refresh(log)
+
+    return _entry(day, brief, log, load, method, workouts, "unknown")

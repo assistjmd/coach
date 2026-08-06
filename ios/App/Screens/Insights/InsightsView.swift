@@ -11,6 +11,11 @@ struct WorkoutSummary: Decodable, Identifiable {
     var id: String { "\(source)-\(sport ?? "")-\(durationS ?? 0)-\(distanceM ?? 0)" }
 }
 
+struct SessionItem: Decodable, Identifiable {
+    let id: String
+    let text: String
+}
+
 struct DayEntry: Decodable, Identifiable {
     let day: String
     let load: Double
@@ -23,6 +28,9 @@ struct DayEntry: Decodable, Identifiable {
     let compliance: String
     let corrected: Bool
     let workouts: [WorkoutSummary]
+    let sessionItems: [SessionItem]
+    let completedItems: [String]
+    let journal: String?
 
     var id: String { day }
     var estimated: Bool { loadMethod != "trimp" }
@@ -305,6 +313,17 @@ private struct DayRow: View {
                     Text(day.workouts.map(Self.describe).joined(separator: " · "))
                         .font(Theme.Font.caption)
                         .foregroundStyle(Theme.Palette.text)
+                }
+                if let journal = day.journal, !journal.isEmpty {
+                    HStack(alignment: .top, spacing: 6) {
+                        Text("✎")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.Palette.accent)
+                        Text(journal)
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Palette.textDim)
+                            .lineLimit(2)
+                    }
                 }
             }
         }

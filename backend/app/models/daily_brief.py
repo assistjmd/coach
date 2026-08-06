@@ -32,6 +32,12 @@ class DailyBrief(Base):
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     flags: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # The prescription broken into discrete, tickable items:
+    # [{"id": "warmup", "text": "10 min easy to warm up"}, ...]
+    # The prose in `training_prescription` stays the thing the athlete reads;
+    # this exists so each piece of it can carry a checkbox, which prose cannot.
+    session_items: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     # 0-100. The calendar colours each day by this, so it has to be a number the
     # coach committed to rather than something re-derived later — the prose and
     # the colour must never disagree.

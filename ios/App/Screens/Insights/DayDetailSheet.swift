@@ -12,6 +12,13 @@ struct DayDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var saving: String?
     @State private var error: String?
+    /// Local copies so a tap is instant. The server is the source of truth, but
+    /// waiting for a round trip before the box fills makes it feel broken.
+    @State private var ticked: Set<String> = []
+    @State private var journal: String = ""
+    @State private var journalSaving = false
+    @State private var loaded = false
+    @FocusState private var journalFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -56,6 +63,8 @@ struct DayDetailSheet: View {
                             }
                         }
 
+                        checklist
+                        journalPanel
                         corrector
 
                         if let error {
@@ -76,6 +85,127 @@ struct DayDetailSheet: View {
             .toolbarBackground(Theme.Palette.bg, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
+        .task {
+            // Once only: re-seeding on every redraw would fight the user's taps.
+            guard !loaded else { return }
+            loaded = true
+            ticked = Set(day.completedItems)
+            journal = day.journal ?? ""
+        }
+    }
+
+    private func toggle(_ id: String) {
+        if ticked.contains(id) { ticked.remove(id) } else { ticked.insert(id) }
+        Task { await persist(items: Array(ticked), journal: nil) }
+    }
+
+    private func saveJournal() async {
+        journalSaving = true
+        defer { journalSaving = false }
+        await persist(items: nil, journal: journal)
+    }
+
+    /// Sends only the fields that changed. The endpoint treats a missing field
+    /// as "leave alone", so ticking a box cannot wipe a note and vice versa.
+    private func persist(items: [String]?, journal: String?) async {
+        var body: [String: Any] = [:]
+        if let items { body["completed_items"] = items }
+        if let journal { body["journal"] = journal }
+        guard !body.isEmpty else { return }
+        do {
+            let updated: DayEntry = try await APIClient.shared.put(
+                "/v1/insights/day/\(day.day)/log", body: body
+            )
+            onUpdated(updated)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    @ViewBuilder
+    private var checklist: some View {
+        if !day.sessionItems.isEmpty {
+            Panel {
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionLabel("The session")
+                    ForEach(day.sessionItems) { item in
+                        Button {
+                            toggle(item.id)
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                ZStack {
+                                    Rectangle()
+                                        .fill(ticked.contains(item.id)
+                                              ? Theme.Palette.accent : Color.clear)
+                                        .overlay(
+                                            Rectangle().stroke(
+                                                ticked.contains(item.id)
+                                                    ? Theme.Palette.accent
+                                                    : Theme.Palette.line,
+                                                lineWidth: 1.5
+                                            )
+                                        )
+                                        .frame(width: 20, height: 20)
+                                    if ticked.contains(item.id) {
+                                        Text("✓")
+                                            .font(.system(size: 13, weight: .black))
+                                            .foregroundStyle(Theme.Palette.bg)
+                                    }
+                                }
+                                Text(item.text)
+                                    .font(Theme.Font.body)
+                                    .multilineTextAlignment(.leading)
+                                    .foregroundStyle(
+                                        ticked.contains(item.id)
+                                            ? Theme.Palette.textDim : Theme.Palette.text
+                                    )
+                                    .strikethrough(ticked.contains(item.id),
+                                                   color: Theme.Palette.textDim)
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private var journalPanel: some View {
+        Panel {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionLabel("Your notes")
+                TextField("", text: $journal, axis: .vertical)
+                    .placeholder(when: journal.isEmpty) {
+                        Text("How did it actually go?")
+                            .foregroundStyle(Theme.Palette.textDim)
+                    }
+                    .focused($journalFocused)
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.Palette.text)
+                    .lineLimit(3...8)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(Theme.Palette.surfaceHigh)
+                    .overlay(Rectangle().stroke(Theme.Palette.line, lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
+                // Saved explicitly rather than on every keystroke: autosaving a
+                // free-text field means a request per character, and a half-typed
+                // sentence briefly becoming the record.
+                if journalFocused || journalDirty {
+                    ActionButton(title: journalSaving ? "Saving" : "Save note") {
+                        journalFocused = false
+                        Task { await saveJournal() }
+                    }
+                    .disabled(journalSaving)
+                }
+            }
+        }
+    }
+
+    private var journalDirty: Bool {
+        journal.trimmingCharacters(in: .whitespacesAndNewlines) != (day.journal ?? "")
     }
 
     private var headline: some View {

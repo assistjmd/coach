@@ -43,6 +43,13 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
                     f"  training_prescription - your call for today, specific enough to act on "
                     f"(sets, duration, intensity). State it in the first person.\n"
                     f"  rationale - one sentence on why. Not a paragraph.\n"
+                    f"  session_items - array of 1-5 objects, each with 'id' (a "
+                    f"short lowercase slug, no spaces) and 'text' (one concrete "
+                    f"thing to do, under 60 characters). These become checkboxes, "
+                    f"so each must be a single action the athlete can tick off - "
+                    f"'3x8 min at threshold', not 'do your session'. Split a "
+                    f"warm-up, main set and cool-down into separate items. On a "
+                    f"rest day return an empty array.\n"
                     f"  readiness_score - integer 0-100 matching your read above. "
                     f"Under 40 is poor, 40-64 moderate, 65+ good. The app colours "
                     f"the day by this, so it must agree with what you wrote.\n"
@@ -85,7 +92,32 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
     )
     planned = parsed.get("session_planned")
     brief.session_planned = planned if isinstance(planned, bool) else None
+    brief.session_items = _clean_items(parsed.get("session_items"))
     brief.model = cfg.anthropic_model_default
     db.commit()
     db.refresh(brief)
     return brief
+
+
+def _clean_items(raw: object) -> list[dict[str, str]] | None:
+    """Validate the model's checkbox items before they reach the database.
+
+    Ids become the key the athlete's ticks are stored against, so a duplicate or
+    missing id would make two checkboxes share one tick. Anything malformed is
+    dropped rather than stored — a checkbox that behaves oddly is worse than one
+    that isn't there.
+    """
+    if not isinstance(raw, list):
+        return None
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for entry in raw[:5]:
+        if not isinstance(entry, dict):
+            continue
+        item_id = str(entry.get("id") or "").strip().lower().replace(" ", "_")
+        text = str(entry.get("text") or "").strip()
+        if not item_id or not text or item_id in seen:
+            continue
+        seen.add(item_id)
+        out.append({"id": item_id, "text": text[:120]})
+    return out or None

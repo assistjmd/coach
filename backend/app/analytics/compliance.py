@@ -60,12 +60,41 @@ def infer(
     return "complete"
 
 
-def resolve(brief: DailyBrief | None) -> Status:
-    """The status to show: the athlete's correction if they made one."""
+def from_ticks(brief: DailyBrief | None, completed: list | None) -> Status | None:
+    """Compliance implied by which prescribed items were ticked off.
+
+    Ticking a box is the athlete telling us directly, which beats matching a
+    workout against a prose prescription. Returns None when there is nothing to
+    read — no items, or none ticked — so the caller falls back to inference
+    rather than treating an untouched checklist as a confession of failure.
+    """
+    if brief is None or not brief.session_items:
+        return None
+    ticked = set(completed or [])
+    if not ticked:
+        return None
+    total = {item["id"] for item in brief.session_items if isinstance(item, dict)}
+    # Ignore ticks for items that no longer exist — a regenerated brief can drop
+    # an item, and a stale id must not count toward the total.
+    done = len(ticked & total)
+    if done == 0:
+        return None
+    return "complete" if done >= len(total) else "partial"
+
+
+def resolve(brief: DailyBrief | None, completed: list | None = None) -> Status:
+    """The status to show, most-authoritative source first.
+
+    Explicit correction beats a tick, a tick beats inference. All three can
+    disagree, and the order is what stops the app arguing with the athlete about
+    their own day.
+    """
     if brief is None:
         return "unknown"
     if brief.compliance_override:
         return brief.compliance_override  # type: ignore[return-value]
+    if (ticked := from_ticks(brief, completed)) is not None:
+        return ticked
     return brief.compliance_auto or "unknown"  # type: ignore[return-value]
 
 

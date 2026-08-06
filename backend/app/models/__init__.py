@@ -1,5 +1,6 @@
 from app.models.chat import ChatMessage
 from app.models.daily_brief import DailyBrief
+from app.models.day_log import DayLog
 from app.models.fitness import (
     BodyMetric,
     HeartRateSample,
@@ -18,6 +19,7 @@ __all__ = [
     "BodyMetric",
     "ChatMessage",
     "DailyBrief",
+    "DayLog",
     "Goal",
     "HRVReading",
     "HeartRateSample",
