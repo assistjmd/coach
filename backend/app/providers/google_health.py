@@ -1,0 +1,301 @@
+"""Google Health API provider — Fitbit, Pixel Watch, and Health Connect data.
+
+Docs:
+- Setup:      https://developers.google.com/health/setup
+- REST:       https://developers.google.com/health/reference/rest
+- Data types: https://developers.google.com/health/data-types
+
+This is the successor to the Fitbit Web API, which shuts down in September 2026.
+Building here rather than against Fitbit directly was the whole point: a Fitbit
+integration written today would need replacing within weeks, and existing Fitbit
+OAuth tokens do not carry over regardless.
+
+Three things about this API that the code below is shaped by:
+
+1. There are no per-metric endpoints. Everything goes through one generic
+   `users/{user}/dataTypes/{type}/dataPoints` collection, so each metric is the
+   same call with a different type name.
+2. Type names are kebab-case in a path and snake_case in a filter. Same data
+   type, two spellings, and getting it wrong is a 404 rather than an error that
+   explains itself.
+3. Access is capped at 100 users until a third-party security review is
+   completed. That is ten times Strava's and Oura's ceiling, so this is not the
+   binding constraint on the beta.
+"""
+
+from __future__ import annotations
+
+import logging
+import urllib.parse
+from collections.abc import Iterable
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import httpx
+
+from app.config import settings
+from app.providers.base import (
+    NormalizedRecord,
+    ProviderInfo,
+    TokenSet,
+    redirect_uri_for,
+)
+from app.providers.sports import Sport, normalize
+
+log = logging.getLogger(__name__)
+
+_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_API_BASE = "https://health.googleapis.com/v4"
+
+# Requested read-only. There is no write path in this app and asking for one
+# would widen the consent screen for capability we never use — on a health app
+# that is the difference between a user granting access and backing out.
+_SCOPES = [
+    "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly",
+    "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
+    "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
+]
+
+# Google's exercise-type vocabulary. Unmapped values fall through to "other" and
+# are logged, so the long tail surfaces instead of silently flattening.
+_GOOGLE_SPORT: dict[str, Sport] = {
+    "RUNNING": "running",
+    "RUNNING_TREADMILL": "running",
+    "RUNNING_TRAIL": "trail_running",
+    "BIKING": "cycling",
+    "BIKING_STATIONARY": "indoor_cycling",
+    "BIKING_MOUNTAIN": "mtb",
+    "SWIMMING_POOL": "swimming",
+    "SWIMMING_OPEN_WATER": "swimming",
+    "ROWING": "rowing",
+    "ROWING_MACHINE": "rowing",
+    "STRENGTH_TRAINING": "strength",
+    "WEIGHTLIFTING": "strength",
+    "WALKING": "walking",
+    "HIKING": "hiking",
+    "YOGA": "yoga",
+    "SKIING_CROSS_COUNTRY": "ski_nordic",
+    "SKIING": "ski_alpine",
+    "SNOWBOARDING": "ski_alpine",
+}
+
+
+class GoogleHealthProvider:
+    info = ProviderInfo(
+        slug="google_health", display_name="Google Health", auth_kind="oauth2"
+    )
+    scopes = _SCOPES
+
+    def oauth_authorize_url(self, state: str) -> str:
+        cfg = settings()
+        params = {
+            "client_id": cfg.google_health_client_id,
+            "response_type": "code",
+            "scope": " ".join(_SCOPES),
+            "redirect_uri": redirect_uri_for("google_health"),
+            "state": state,
+            # Google only returns a refresh token when both are set, and only on
+            # the FIRST consent. Without "consent" a returning user who
+            # reconnects gets an access token that expires in an hour and no way
+            # to renew it — the connection then dies silently a day later.
+            "access_type": "offline",
+            "prompt": "consent",
+        }
+        return f"{_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
+
+    def exchange_code(self, code: str) -> TokenSet:
+        cfg = settings()
+        with httpx.Client(timeout=15) as client:
+            r = client.post(
+                _TOKEN_URL,
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": redirect_uri_for("google_health"),
+                    "client_id": cfg.google_health_client_id,
+                    "client_secret": cfg.google_health_client_secret,
+                },
+            )
+            r.raise_for_status()
+            return _token_from_response(r.json())
+
+    def refresh(self, token: TokenSet) -> TokenSet:
+        cfg = settings()
+        if not token.refresh_token:
+            raise ValueError("no refresh token")
+        with httpx.Client(timeout=15) as client:
+            r = client.post(
+                _TOKEN_URL,
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": token.refresh_token,
+                    "client_id": cfg.google_health_client_id,
+                    "client_secret": cfg.google_health_client_secret,
+                },
+            )
+            r.raise_for_status()
+            data = r.json()
+            # A refresh response omits the refresh token. Carrying the old one
+            # forward is required — dropping it turns a renewable connection
+            # into a one-hour one.
+            return _token_from_response(data, fallback_refresh=token.refresh_token)
+
+    def sync(
+        self,
+        token: TokenSet,
+        since: datetime | None,
+        until: datetime | None = None,
+    ) -> Iterable[NormalizedRecord]:
+        since = since or (datetime.now(timezone.utc) - timedelta(days=30))
+        until = until or datetime.now(timezone.utc)
+        headers = {"Authorization": f"Bearer {token.access_token}"}
+
+        with httpx.Client(timeout=30, headers=headers) as client:
+            yield from _sync_exercise(client, since, until)
+            yield from _sync_sleep(client, since, until)
+            yield from _sync_hrv(client, since, until)
+            yield from _sync_resting_hr(client, since, until)
+
+
+def _token_from_response(
+    data: dict[str, Any], fallback_refresh: str | None = None
+) -> TokenSet:
+    expires_in = data.get("expires_in")
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+        if expires_in is not None
+        else None
+    )
+    return TokenSet(
+        access_token=data["access_token"],
+        refresh_token=data.get("refresh_token") or fallback_refresh,
+        expires_at=expires_at,
+        scope=data.get("scope"),
+    )
+
+
+def _points(
+    client: httpx.Client,
+    data_type: str,
+    since: datetime,
+    until: datetime,
+) -> Iterable[dict[str, Any]]:
+    """Page through one data type's points.
+
+    `data_type` is kebab-case here because it goes in the path. The snake_case
+    spelling is only for filter parameters — see the module docstring.
+    """
+    page_token: str | None = None
+    # The API is generous with page size but a runaway loop on a malformed
+    # cursor would hammer it. 50 pages is far past any real 30-day window.
+    for _ in range(50):
+        params: dict[str, Any] = {
+            "startTime": since.isoformat().replace("+00:00", "Z"),
+            "endTime": until.isoformat().replace("+00:00", "Z"),
+            "pageSize": 200,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        r = client.get(f"{_API_BASE}/users/me/dataTypes/{data_type}/dataPoints", params=params)
+        if r.status_code == 403:
+            # Scope not granted. One missing permission must not abort the whole
+            # sync — the other three data types are still worth having.
+            log.warning("google_health: no access to %s", data_type)
+            return
+        r.raise_for_status()
+        body = r.json()
+        yield from body.get("dataPoints", [])
+        page_token = body.get("nextPageToken")
+        if not page_token:
+            return
+    log.warning("google_health: page cap hit for %s", data_type)
+
+
+def _pid(point: dict[str, Any], suffix: str = "") -> str:
+    """A stable id for deduplication.
+
+    `name` is the API's own resource identifier and is what we want. Falling
+    back to the time window keeps ingestion working if it is ever absent, at the
+    cost of a duplicate if the same window is re-reported.
+    """
+    base = point.get("name") or f"{point.get('startTime')}-{point.get('endTime')}"
+    return f"{base}{suffix}"
+
+
+def _sync_exercise(
+    c: httpx.Client, since: datetime, until: datetime
+) -> Iterable[NormalizedRecord]:
+    for p in _points(c, "exercise", since, until):
+        v = p.get("value") or {}
+        yield NormalizedRecord(
+            kind="workout",
+            source_record_id=_pid(p),
+            payload={
+                "started_at": p.get("startTime"),
+                "ended_at": p.get("endTime"),
+                "sport": normalize(v.get("exerciseType"), _GOOGLE_SPORT),
+                "distance_m": v.get("distance"),
+                "avg_hr": v.get("averageHeartRate"),
+                "max_hr": v.get("maxHeartRate"),
+                "raw": p,
+            },
+        )
+
+
+def _sync_sleep(
+    c: httpx.Client, since: datetime, until: datetime
+) -> Iterable[NormalizedRecord]:
+    for p in _points(c, "sleep", since, until):
+        v = p.get("value") or {}
+        yield NormalizedRecord(
+            kind="sleep",
+            source_record_id=_pid(p),
+            payload={
+                "started_at": p.get("startTime"),
+                "ended_at": p.get("endTime"),
+                "deep_s": v.get("deepSleepDuration"),
+                "light_s": v.get("lightSleepDuration"),
+                "rem_s": v.get("remSleepDuration"),
+                "awake_s": v.get("awakeDuration"),
+                "efficiency": v.get("efficiency"),
+                "raw": p,
+            },
+        )
+
+
+def _sync_hrv(
+    c: httpx.Client, since: datetime, until: datetime
+) -> Iterable[NormalizedRecord]:
+    for p in _points(c, "heart-rate-variability", since, until):
+        v = p.get("value") or {}
+        # Google reports HRV as RMSSD, same measure as Oura. Storing an SDNN
+        # value in this column alongside RMSSD would make the trend meaningless,
+        # so anything without an explicit rmssd is skipped rather than guessed.
+        rmssd = v.get("rmssd") or v.get("heartRateVariabilityMillis")
+        if rmssd is None:
+            continue
+        yield NormalizedRecord(
+            kind="hrv",
+            source_record_id=_pid(p, "-rmssd"),
+            payload={"measured_at": p.get("startTime"), "rmssd_ms": rmssd},
+        )
+
+
+def _sync_resting_hr(
+    c: httpx.Client, since: datetime, until: datetime
+) -> Iterable[NormalizedRecord]:
+    for p in _points(c, "daily-resting-heart-rate", since, until):
+        v = p.get("value") or {}
+        bpm = v.get("bpm") or v.get("beatsPerMinute")
+        if bpm is None:
+            continue
+        yield NormalizedRecord(
+            kind="body_metric",
+            source_record_id=_pid(p, "-rhr"),
+            payload={
+                "measured_at": p.get("startTime"),
+                "metric": "resting_hr",
+                "value": bpm,
+            },
+        )

@@ -145,6 +145,28 @@ final class APIClient {
         return try await send(req)
     }
 
+    /// Fetch a response body without decoding it.
+    ///
+    /// For the data export, which is written straight to a file. Round-tripping
+    /// it through a Swift type would mean maintaining a mirror of every table
+    /// just to re-serialize it byte-for-byte.
+    func getRaw(_ path: String) async throws -> Data {
+        let req = try makeRequest(path: path, method: "GET")
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: req)
+        } catch {
+            throw APIError.transport(error)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.http(0, "no response")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        return data
+    }
+
     private func makeRequest(path: String, method: String) throws -> URLRequest {
         var req = URLRequest(url: try url(for: path))
         req.httpMethod = method

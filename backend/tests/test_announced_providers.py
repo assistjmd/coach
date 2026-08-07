@@ -8,10 +8,13 @@ sync path.
 
 import pytest
 
+from app.config import settings
 from app.providers import all_providers, get_provider
 from app.providers.announced import NotYetAvailable
 
-ANNOUNCED = ("garmin", "google_health")
+# Garmin only. Google Health flips to the real provider as soon as its
+# credentials exist — see `test_google_health_is_announced_only_without_creds`.
+ANNOUNCED = ("garmin",)
 
 
 @pytest.mark.parametrize("slug", ANNOUNCED)
@@ -49,6 +52,25 @@ def test_live_providers_are_unaffected(client, auth):
     live = {p["slug"]: p for p in body["providers"] if p["available"]}
     assert {"oura", "strava", "healthkit"} <= set(live)
     assert all(p["note"] is None for p in live.values())
+
+
+def test_google_health_is_announced_only_without_creds():
+    """The row must not offer Connect in an environment with no client id.
+
+    Otherwise the failure lands after the user has already left the app for
+    Google's consent screen, which reads as the app being broken rather than
+    the integration not being configured.
+    """
+    from app.providers.announced import GOOGLE_HEALTH
+    from app.providers.google_health import GoogleHealthProvider
+
+    p = get_provider("google_health")
+    if settings().google_health_client_id:
+        assert isinstance(p, GoogleHealthProvider)
+        assert p.info.availability == "live"
+    else:
+        assert p is GOOGLE_HEALTH
+        assert p.info.availability == "coming_soon"
 
 
 def test_announced_sort_after_live():

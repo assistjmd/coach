@@ -14,6 +14,13 @@ struct ConsentStep: View {
     @State private var submitting = false
     @State private var error: String?
     @State private var sheet: URL?
+    /// Defaulted to 30 years ago, not today. A picker sitting on today's date
+    /// means the very first drag reads as "born this year", and it also nudges
+    /// nobody toward a particular answer.
+    @State private var birthDate = Calendar.current.date(
+        byAdding: .year, value: -30, to: Date()
+    ) ?? Date()
+    @State private var enteredBirthDate = false
 
     private var base: String { APIClient.shared.baseURL.absoluteString }
 
@@ -62,6 +69,8 @@ struct ConsentStep: View {
                             }
                         }
 
+                        agePanel
+
                         VStack(spacing: 8) {
                             documentLink("Terms of Use", path: "/legal/terms")
                             documentLink("Privacy Policy", path: "/legal/privacy")
@@ -80,8 +89,8 @@ struct ConsentStep: View {
                 ActionButton(title: submitting ? "One moment" : "I agree") {
                     Task { await accept() }
                 }
-                .disabled(submitting || version == nil)
-                .opacity(submitting || version == nil ? 0.6 : 1)
+                .disabled(!canAccept)
+                .opacity(canAccept ? 1 : 0.6)
                 .padding(.top, 12)
 
                 Text("Tapping I agree records that you accepted both documents.")
@@ -95,6 +104,57 @@ struct ConsentStep: View {
         }
         .task { await loadVersion() }
         .sheet(item: $sheet) { url in SafariView(url: url) }
+    }
+
+    /// Date of birth, required by the terms' 16+ rule.
+    ///
+    /// A picker rather than a "I am 16 or over" checkbox: a checkbox records
+    /// only that somebody tapped a button, which is worth very little if the
+    /// question is ever actually asked.
+    private var agePanel: some View {
+        Panel(accent: enteredBirthDate && !isOldEnough ? Theme.Palette.bad : nil) {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionLabel("Date of birth")
+                DatePicker(
+                    "",
+                    selection: Binding(
+                        get: { birthDate },
+                        set: { birthDate = $0; enteredBirthDate = true }
+                    ),
+                    in: ...Date(),
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.compact)
+                .labelsHidden()
+                .tint(Theme.Palette.accent)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if enteredBirthDate && !isOldEnough {
+                    Text("Coach Will is for people 16 and over.")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Palette.bad)
+                } else {
+                    Text("Coach Will handles health data, so it's for 16 and over. "
+                         + "We use this only to check that.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.Palette.textDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var isOldEnough: Bool {
+        let years = Calendar.current.dateComponents(
+            [.year], from: birthDate, to: Date()
+        ).year ?? 0
+        return years >= 16
+    }
+
+    /// Requires an explicit interaction with the picker. Without that flag the
+    /// default of 30 years ago would silently count as an answer nobody gave.
+    private var canAccept: Bool {
+        !submitting && version != nil && enteredBirthDate && isOldEnough
     }
 
     private func documentLink(_ title: String, path: String) -> some View {
@@ -141,7 +201,8 @@ struct ConsentStep: View {
         do {
             struct Empty: Decodable {}
             let _: Empty = try await APIClient.shared.post(
-                "/v1/me/consent", body: ["version": version]
+                "/v1/me/consent",
+                body: ["version": version, "date_of_birth": CalendarDate.localString(from: birthDate)]
             )
             onAccepted()
         } catch {

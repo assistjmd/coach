@@ -1,6 +1,7 @@
 from app.config import settings
 from app.providers.announced import GARMIN, GOOGLE_HEALTH
 from app.providers.base import Provider
+from app.providers.google_health import GoogleHealthProvider
 from app.providers.healthkit import HealthKitProvider
 from app.providers.oura import OuraProvider
 from app.providers.strava import StravaProvider
@@ -13,8 +14,15 @@ _PROVIDERS: dict[str, Provider] = {
     # `get_provider` returns something the connect route can refuse cleanly,
     # instead of a 404 that reads like a bug.
     "garmin": GARMIN,
-    "google_health": GOOGLE_HEALTH,
 }
+
+# Google Health goes live only once its credentials exist. Registering the real
+# provider unconditionally would put a working Connect button in front of every
+# user of an environment that has no client id, and the failure would land after
+# they had already left the app for Google's consent screen.
+_PROVIDERS["google_health"] = (
+    GoogleHealthProvider() if settings().google_health_client_id else GOOGLE_HEALTH
+)
 
 if settings().app_env == "dev":
     # Import lazily so the mock module isn't even loaded outside dev.

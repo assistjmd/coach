@@ -89,7 +89,7 @@ def test_deleted_account_cannot_keep_using_its_token(client, user, auth):
 def test_consent_is_recorded_for_both_documents(client, db, user, auth):
     resp = client.post(
         "/v1/me/consent",
-        json={"version": CURRENT_LEGAL_VERSION},
+        json={"version": CURRENT_LEGAL_VERSION, "date_of_birth": "1990-05-14"},
         headers=auth,
     )
     assert resp.status_code == 201
@@ -122,10 +122,14 @@ def test_consent_history_is_append_only(client, db, user, auth):
     """Re-accepting must not overwrite the earlier record — the question later is
     which versions were accepted and when."""
     client.post(
-        "/v1/me/consent", json={"version": CURRENT_LEGAL_VERSION}, headers=auth
+        "/v1/me/consent",
+        json={"version": CURRENT_LEGAL_VERSION, "date_of_birth": "1990-05-14"},
+        headers=auth,
     )
     client.post(
-        "/v1/me/consent", json={"version": CURRENT_LEGAL_VERSION}, headers=auth
+        "/v1/me/consent",
+        json={"version": CURRENT_LEGAL_VERSION, "date_of_birth": "1990-05-14"},
+        headers=auth,
     )
     count = db.query(LegalConsent).filter(LegalConsent.user_id == user.id).count()
     assert count == 4  # two documents, twice

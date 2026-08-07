@@ -32,6 +32,8 @@ struct ProfileView: View {
                     header
                     goalPanel
                     saveRow
+                    ReminderPanel()
+                    ExportPanel()
                     signOutRow
                 }
                 .padding(.horizontal, Theme.Metric.gutter)

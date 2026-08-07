@@ -139,6 +139,12 @@ def _apply(db: Session, user_id, source: str, rec: NormalizedRecord) -> None:
             ended_at=p["ended_at"],
             duration_s=_duration_s(p),
             distance_m=p.get("distance_m"),
+            # Heart rate decides whether a session is scored by TRIMP or by the
+            # duration fallback. Omitting these silently downgraded every cloud
+            # workout to the estimate — the provider was sending them, and they
+            # were being dropped between the payload and the row.
+            avg_hr=p.get("avg_hr"),
+            max_hr=p.get("max_hr"),
             raw=p.get("raw"),
         )
         db.execute(stmt.on_conflict_do_nothing(constraint="uq_workout_source_id"))

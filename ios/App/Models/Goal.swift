@@ -130,6 +130,17 @@ enum CalendarDate {
     }()
 
     static func string(from date: Date) -> String { formatter.string(from: date) }
+
+    /// For dates the user picked on this device, where the calendar day they saw
+    /// is the answer.
+    ///
+    /// The UTC formatter above is correct for a goal date that must round-trip
+    /// unchanged across timezones. It is wrong here: a birthday chosen at 8am in
+    /// Tokyo is the previous day in UTC, and would be sent as such.
+    static func localString(from date: Date) -> String {
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
     static func date(from string: String?) -> Date? {
         guard let string else { return nil }
         return formatter.date(from: string)

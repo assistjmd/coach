@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -7,6 +7,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from app.auth.deps import current_user
+from app.dates import today_for
 from app.db import get_db
 from app.models import LegalConsent, OAuthToken, User
 from app.providers import all_providers
@@ -158,8 +159,24 @@ def reset_onboarding(
 CURRENT_LEGAL_VERSION = "2026-08-05"
 
 
+# The terms set this. Sixteen rather than thirteen because the app processes
+# health data, which most privacy regimes treat as a special category with a
+# higher age of valid consent.
+MINIMUM_AGE = 16
+
+
 class ConsentBody(BaseModel):
     version: str
+    # Captured with consent rather than in a separate step: agreeing to terms
+    # you are too young to agree to is the thing being prevented, so the age and
+    # the agreement belong in one transaction.
+    date_of_birth: date | None = None
+
+
+def _age_on(born: date, today: date) -> int:
+    """Completed years. The tuple comparison handles the birthday-not-yet-reached
+    case without any month/day arithmetic."""
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
 
 
 class ConsentStatus(BaseModel):
@@ -207,6 +224,25 @@ def record_consent(
             status.HTTP_409_CONFLICT,
             f"stale version {body.version}; current is {CURRENT_LEGAL_VERSION}",
         )
+
+    born = body.date_of_birth or user.date_of_birth
+    if born is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "date of birth is required"
+        )
+    today = today_for(user)
+    if born > today:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "date of birth is in the future")
+    if _age_on(born, today) < MINIMUM_AGE:
+        # 403 rather than 400: the request is well-formed and the answer is no.
+        # The account is left without consent, so nothing downstream treats them
+        # as having agreed.
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"Coach Will is for people {MINIMUM_AGE} and over.",
+        )
+    user.date_of_birth = born
+
     for document in ("terms", "privacy"):
         db.add(LegalConsent(user_id=user.id, document=document, version=body.version))
     db.commit()
