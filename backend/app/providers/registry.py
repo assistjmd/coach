@@ -1,4 +1,5 @@
 from app.config import settings
+from app.providers.announced import GARMIN, GOOGLE_HEALTH
 from app.providers.base import Provider
 from app.providers.healthkit import HealthKitProvider
 from app.providers.oura import OuraProvider
@@ -8,6 +9,11 @@ _PROVIDERS: dict[str, Provider] = {
     "oura": OuraProvider(),
     "strava": StravaProvider(),
     "healthkit": HealthKitProvider(),
+    # Listed but not connectable yet. Registered rather than special-cased so
+    # `get_provider` returns something the connect route can refuse cleanly,
+    # instead of a 404 that reads like a bug.
+    "garmin": GARMIN,
+    "google_health": GOOGLE_HEALTH,
 }
 
 if settings().app_env == "dev":

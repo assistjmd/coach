@@ -43,6 +43,10 @@ class ProviderInfo:
     slug: str
     display_name: str
     auth_kind: Literal["oauth2", "device_push"]
+    # "coming_soon" means listed in the app but not connectable — see
+    # `announced.py`. Defaulting to "live" keeps every existing provider
+    # unchanged.
+    availability: Literal["live", "coming_soon"] = "live"
 
 
 class Provider(Protocol):

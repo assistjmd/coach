@@ -85,6 +85,15 @@ def authorize(slug: str, user: User = Depends(current_user)) -> AuthorizeRespons
         provider = get_provider(slug)
     except KeyError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown provider: {slug}") from None
+    if provider.info.availability != "live":
+        # Listed in the app, not connectable yet. A 409 with the reason is what
+        # the client shows; letting this through would build an authorize URL
+        # against a client id we don't have.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            getattr(provider, "note", None)
+            or f"{provider.info.display_name} isn't available yet",
+        )
     if provider.info.auth_kind != "oauth2":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "provider does not use OAuth")
 

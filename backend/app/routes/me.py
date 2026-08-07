@@ -24,6 +24,12 @@ class ConnectedProvider(BaseModel):
     # Why the last sync failed, if it did. The app shows this so a revoked
     # authorization reads as a revoked authorization rather than as no new data.
     last_sync_error: str | None = None
+    # False for sources we list but cannot connect yet. The app renders these
+    # as announced rather than broken.
+    available: bool = True
+    # Why it isn't available, and what happens next. Only set when available
+    # is False.
+    note: str | None = None
 
 
 class MeResponse(BaseModel):
@@ -57,6 +63,8 @@ def _me(user: User, db: Session) -> MeResponse:
             connected=(p.info.slug in tokens) or p.info.auth_kind == "device_push",
             last_synced_at=tokens[p.info.slug].last_synced_at if p.info.slug in tokens else None,
             last_sync_error=tokens[p.info.slug].last_sync_error if p.info.slug in tokens else None,
+            available=p.info.availability == "live",
+            note=getattr(p, "note", None) if p.info.availability != "live" else None,
         )
         for p in all_providers()
     ]

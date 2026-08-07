@@ -8,7 +8,15 @@ struct ProviderRow: Decodable, Identifiable {
     /// Why the last sync failed, if it did. Without this a revoked
     /// authorization and a provider with nothing new both render as silence.
     let lastSyncError: String?
+    /// False for sources we list but can't connect yet, pending an approval
+    /// we don't control. Defaulted so an older client against a newer server —
+    /// or the reverse — doesn't fail to decode.
+    let available: Bool?
+    /// Why it isn't available, and what happens next.
+    let note: String?
     var id: String { slug }
+
+    var isAnnounced: Bool { available == false }
 }
 
 /// `GET /v1/me`. Also the app's launch-state check — see `SessionStore.bootstrap`.

@@ -110,10 +110,15 @@ private struct ProviderRowView: View {
         Panel(accent: isLive ? Theme.Palette.accent : nil) {
             HStack(alignment: .center, spacing: 14) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(p.displayName.uppercased())
-                        .font(.system(size: 15, weight: .heavy))
-                        .tracking(0.8)
-                        .foregroundStyle(Theme.Palette.text)
+                    HStack(spacing: 8) {
+                        Text(p.displayName.uppercased())
+                            .font(.system(size: 15, weight: .heavy))
+                            .tracking(0.8)
+                            .foregroundStyle(
+                                p.isAnnounced ? Theme.Palette.textDim : Theme.Palette.text
+                            )
+                        if p.isAnnounced { soonChip }
+                    }
                     status
                 }
                 Spacer(minLength: 8)
@@ -124,6 +129,21 @@ private struct ProviderRowView: View {
                 }
             }
         }
+        // Dimmed rather than hidden. A Garmin user who sees only Oura and Strava
+        // concludes their watch is unsupported and leaves; seeing it listed and
+        // pending is the difference between "not for me" and "not yet".
+        .opacity(p.isAnnounced ? 0.65 : 1)
+    }
+
+    private var soonChip: some View {
+        Text("SOON")
+            .font(.system(size: 9, weight: .heavy))
+            .tracking(1.0)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .foregroundStyle(Theme.Palette.caution)
+            .overlay(Rectangle().stroke(Theme.Palette.caution, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 2))
     }
 
     /// Whether this source is actually delivering data, as opposed to merely
@@ -141,7 +161,12 @@ private struct ProviderRowView: View {
     /// "synced" so the gap after connecting doesn't look like a failure.
     @ViewBuilder
     private var status: some View {
-        if p.slug == "healthkit" {
+        if p.isAnnounced {
+            Text(p.note ?? "Not available yet")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.textDim)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if p.slug == "healthkit" {
             healthKitStatus
         } else if let err = p.lastSyncError {
             Text(err)
@@ -192,7 +217,12 @@ private struct ProviderRowView: View {
 
     @ViewBuilder
     private var actionControl: some View {
-        if p.slug == "healthkit" {
+        if p.isAnnounced {
+            // No button at all. A disabled "Connect" invites tapping and then
+            // does nothing, which reads as a broken app rather than a pending
+            // integration.
+            EmptyView()
+        } else if p.slug == "healthkit" {
             // The server reports HealthKit as "connected" for every user, since it
             // can't see the device's permission state. What it means locally is:
             // have we asked, and has anything actually arrived.
