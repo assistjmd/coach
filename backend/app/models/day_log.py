@@ -35,6 +35,15 @@ class DayLog(Base):
     # silently re-point the ticks at the wrong sessions.
     completed_items: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
+    # What they actually did, where it differed from the prescription:
+    # {"main": {"sets": 4, "reps": 6}}
+    #
+    # Only the differences are stored. An item done as prescribed has no entry,
+    # so "did exactly what was asked" and "recorded nothing" stay distinguishable
+    # — which matters, because a coach reading back over the week needs to know
+    # whether four sets was a deviation or the plan.
+    item_actuals: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

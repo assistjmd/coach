@@ -14,6 +14,17 @@ struct WorkoutSummary: Decodable, Identifiable {
 struct SessionItem: Decodable, Identifiable {
     let id: String
     let text: String
+    /// Prescribed counts. Absent when the item isn't countable — a 20 minute
+    /// easy run has neither — and their absence is what tells the UI not to
+    /// offer a stepper.
+    let sets: Int?
+    let reps: Int?
+}
+
+/// What was actually done, when it differed from the prescription.
+struct ItemActual: Codable {
+    let sets: Int?
+    let reps: Int?
 }
 
 struct DayEntry: Decodable, Identifiable {
@@ -30,6 +41,7 @@ struct DayEntry: Decodable, Identifiable {
     let workouts: [WorkoutSummary]
     let sessionItems: [SessionItem]
     let completedItems: [String]
+    let itemActuals: [String: ItemActual]
     let journal: String?
 
     var id: String { day }

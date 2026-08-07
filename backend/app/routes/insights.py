@@ -35,6 +35,16 @@ class WorkoutSummary(BaseModel):
 class SessionItem(BaseModel):
     id: str
     text: str
+    # Prescribed counts, absent when the item isn't countable (an easy 20 minutes
+    # has neither). Their presence is what tells the client to offer a stepper.
+    sets: int | None = None
+    reps: int | None = None
+
+
+class ItemActual(BaseModel):
+    """What was actually done, when it differed from the prescription."""
+    sets: int | None = None
+    reps: int | None = None
 
 
 class DayEntry(BaseModel):
@@ -54,6 +64,8 @@ class DayEntry(BaseModel):
     # The prescription split into tickable pieces, plus which the athlete ticked.
     session_items: list[SessionItem]
     completed_items: list[str]
+    # Keyed by item id. Only present for items done differently from prescribed.
+    item_actuals: dict[str, ItemActual]
     journal: str | None
 
 
@@ -73,6 +85,7 @@ class ComplianceUpdate(BaseModel):
 class DayLogUpdate(BaseModel):
     journal: str | None = None
     completed_items: list[str] | None = None
+    item_actuals: dict[str, ItemActual] | None = None
 
 
 def _entry(
@@ -107,11 +120,18 @@ def _entry(
             for w in workouts
         ],
         session_items=[
-            SessionItem(id=i["id"], text=i["text"])
+            SessionItem(
+                id=i["id"], text=i["text"], sets=i.get("sets"), reps=i.get("reps")
+            )
             for i in (brief.session_items or [])
             if isinstance(i, dict) and i.get("id") and i.get("text")
         ] if brief else [],
         completed_items=completed,
+        item_actuals={
+            k: ItemActual(**v)
+            for k, v in ((log.item_actuals or {}) if log else {}).items()
+            if isinstance(v, dict)
+        },
         journal=log.journal if log else None,
     )
 
@@ -293,6 +313,20 @@ def update_log(
         # an item, and keeping a stale id would inflate the completion count
         # against a checkbox nobody can see.
         log.completed_items = [i for i in body.completed_items if i in valid]
+    if body.item_actuals is not None:
+        valid_ids = {
+            i["id"] for i in (brief.session_items or [])
+            if isinstance(i, dict) and i.get("id")
+        } if brief else set()
+        # Same reasoning as the ticks: an entry for an item the brief no longer
+        # contains would be unreachable in the UI and misleading in the record.
+        # Entries with nothing set are dropped rather than stored as empty
+        # objects, so "logged nothing" doesn't masquerade as "logged a change".
+        log.item_actuals = {
+            k: v.model_dump(exclude_none=True)
+            for k, v in body.item_actuals.items()
+            if k in valid_ids and v.model_dump(exclude_none=True)
+        } or None
     db.commit()
     db.refresh(log)
 

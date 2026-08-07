@@ -27,8 +27,7 @@ def _brief(db, user, **kw) -> DailyBrief:
         training_prescription="p",
         model="test",
         session_planned=True,
-        session_items=ITEMS,
-        **kw,
+        **{"session_items": ITEMS, **kw},
     )
     db.add(b)
     db.commit()
@@ -161,3 +160,82 @@ def test_one_log_row_per_day(client, db, user, auth):
         client.put(f"/v1/insights/day/{DAY}/log", json={"journal": note}, headers=auth)
     rows = db.query(DayLog).filter(DayLog.user_id == user.id, DayLog.day == DAY).count()
     assert rows == 1
+
+
+# --- actual sets and reps ------------------------------------------------
+
+COUNTED = [
+    {"id": "main", "text": "3x8 back squat", "sets": 3, "reps": 8},
+    {"id": "easy", "text": "20 min easy"},
+]
+
+
+def test_prescribed_counts_are_returned(client, db, user, auth):
+    _brief(db, user, session_items=COUNTED)
+    day = client.get(f"/v1/insights/calendar?start={DAY}&end={DAY}",
+                     headers=auth).json()["days"][0]
+    items = {i["id"]: i for i in day["session_items"]}
+    assert items["main"]["sets"] == 3
+    assert items["main"]["reps"] == 8
+    # An uncountable item must not get invented numbers — their absence is what
+    # tells the client not to offer a stepper.
+    assert items["easy"]["sets"] is None
+    assert items["easy"]["reps"] is None
+
+
+def test_logging_a_different_number_of_sets(client, db, user, auth):
+    _brief(db, user, session_items=COUNTED)
+    resp = client.put(
+        f"/v1/insights/day/{DAY}/log",
+        json={"item_actuals": {"main": {"sets": 4, "reps": 6}}},
+        headers=auth,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["item_actuals"]["main"] == {"sets": 4, "reps": 6}
+
+
+def test_actuals_only_exist_where_something_differed(client, db, user, auth):
+    """No entry means "as prescribed". Storing empties would make that
+    indistinguishable from a deviation."""
+    _brief(db, user, session_items=COUNTED)
+    resp = client.put(
+        f"/v1/insights/day/{DAY}/log",
+        json={"item_actuals": {"main": {}}},
+        headers=auth,
+    )
+    assert resp.json()["item_actuals"] == {}
+
+
+def test_actuals_for_unknown_items_are_dropped(client, db, user, auth):
+    _brief(db, user, session_items=COUNTED)
+    resp = client.put(
+        f"/v1/insights/day/{DAY}/log",
+        json={"item_actuals": {"main": {"sets": 4}, "ghost": {"sets": 9}}},
+        headers=auth,
+    )
+    body = resp.json()["item_actuals"]
+    assert "main" in body and "ghost" not in body
+
+
+def test_actuals_survive_a_journal_save(client, db, user, auth):
+    _brief(db, user, session_items=COUNTED)
+    client.put(f"/v1/insights/day/{DAY}/log",
+               json={"item_actuals": {"main": {"sets": 5}}}, headers=auth)
+    resp = client.put(f"/v1/insights/day/{DAY}/log",
+                      json={"journal": "felt strong"}, headers=auth)
+    assert resp.json()["item_actuals"]["main"]["sets"] == 5
+
+
+def test_today_carries_counts_and_actuals(client, db, user, auth):
+    """The Today tab is where sets get logged, so it needs both."""
+    from datetime import date as _date
+    b = DailyBrief(user_id=user.id, day=_date.today(), readiness_summary="s",
+                   training_prescription="p", model="test", session_planned=True,
+                   session_items=COUNTED)
+    db.add(b)
+    db.commit()
+    client.put(f"/v1/insights/day/{_date.today()}/log",
+               json={"item_actuals": {"main": {"sets": 4}}}, headers=auth)
+    body = client.get("/v1/dashboard/today", headers=auth).json()
+    assert body["session_items"][0]["sets"] == 3
+    assert body["item_actuals"]["main"]["sets"] == 4

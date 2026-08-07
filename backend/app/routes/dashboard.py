@@ -21,6 +21,13 @@ _MAX_BRIEF_AGE = timedelta(days=1)
 class SessionItem(BaseModel):
     id: str
     text: str
+    sets: int | None = None
+    reps: int | None = None
+
+
+class ItemActual(BaseModel):
+    sets: int | None = None
+    reps: int | None = None
 
 
 class TodayBrief(BaseModel):
@@ -35,6 +42,7 @@ class TodayBrief(BaseModel):
     # belongs on the screen you already have open, not two taps into history.
     session_items: list[SessionItem] = []
     completed_items: list[str] = []
+    item_actuals: dict[str, ItemActual] = {}
 
 
 @router.get("/today", response_model=TodayBrief)
@@ -47,7 +55,8 @@ def today(user: User = Depends(current_user), db: Session = Depends(get_db)) -> 
         .first()
     )
     if brief is not None and brief.day == today_:
-        return _as_response(brief, completed=_completed(db, user, brief.day))
+        completed, actuals = _log_state(db, user, brief.day)
+        return _as_response(brief, completed=completed, actuals=actuals)
 
     # Nothing for today. The nightly job runs at a fixed hour, so a user who
     # signs up after it has already run would otherwise stare at "no brief yet"
@@ -55,7 +64,8 @@ def today(user: User = Depends(current_user), db: Session = Depends(get_db)) -> 
     if _has_data(db, user):
         try:
             fresh = generate_daily_brief(db, user, day=today_)
-            return _as_response(fresh, completed=_completed(db, user, fresh.day))
+            completed, actuals = _log_state(db, user, fresh.day)
+            return _as_response(fresh, completed=completed, actuals=actuals)
         except Exception:
             log.exception("on-demand brief generation failed for user %s", user.id)
 
@@ -66,10 +76,12 @@ def today(user: User = Depends(current_user), db: Session = Depends(get_db)) -> 
         )
     # Fall back to the most recent brief, flagged so the client can say when it
     # is from rather than presenting yesterday's numbers as today's.
+    completed, actuals = _log_state(db, user, brief.day)
     return _as_response(
         brief,
         stale=today_ - brief.day > _MAX_BRIEF_AGE,
-        completed=_completed(db, user, brief.day),
+        completed=completed,
+        actuals=actuals,
     )
 
 
@@ -82,7 +94,10 @@ def _has_data(db: Session, user: User) -> bool:
 
 
 def _as_response(
-    brief: DailyBrief, stale: bool = False, completed: list[str] | None = None
+    brief: DailyBrief,
+    stale: bool = False,
+    completed: list[str] | None = None,
+    actuals: dict[str, ItemActual] | None = None,
 ) -> TodayBrief:
     return TodayBrief(
         day=brief.day,
@@ -92,18 +107,30 @@ def _as_response(
         flags=brief.flags,
         stale=stale,
         session_items=[
-            SessionItem(id=i["id"], text=i["text"])
+            SessionItem(
+                id=i["id"], text=i["text"], sets=i.get("sets"), reps=i.get("reps")
+            )
             for i in (brief.session_items or [])
             if isinstance(i, dict) and i.get("id") and i.get("text")
         ],
         completed_items=completed or [],
+        item_actuals=actuals or {},
     )
 
 
-def _completed(db: Session, user: User, day: date) -> list[str]:
+def _log_state(
+    db: Session, user: User, day: date
+) -> tuple[list[str], dict[str, ItemActual]]:
     log_row = (
         db.query(DayLog)
         .filter(DayLog.user_id == user.id, DayLog.day == day)
         .one_or_none()
     )
-    return list(log_row.completed_items or []) if log_row else []
+    if log_row is None:
+        return [], {}
+    actuals = {
+        k: ItemActual(**v)
+        for k, v in (log_row.item_actuals or {}).items()
+        if isinstance(v, dict)
+    }
+    return list(log_row.completed_items or []), actuals

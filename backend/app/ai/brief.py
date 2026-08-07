@@ -43,13 +43,19 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
                     f"  training_prescription - your call for today, specific enough to act on "
                     f"(sets, duration, intensity). State it in the first person.\n"
                     f"  rationale - one sentence on why. Not a paragraph.\n"
-                    f"  session_items - array of 1-5 objects, each with 'id' (a "
+                    f"  session_items - array of 1-5 objects. Each has 'id' (a "
                     f"short lowercase slug, no spaces) and 'text' (one concrete "
                     f"thing to do, under 60 characters). These become checkboxes, "
                     f"so each must be a single action the athlete can tick off - "
-                    f"'3x8 min at threshold', not 'do your session'. Split a "
-                    f"warm-up, main set and cool-down into separate items. On a "
-                    f"rest day return an empty array.\n"
+                    f"'3x8 at threshold', not 'do your session'. Split warm-up, "
+                    f"main set and cool-down into separate items. On a rest day "
+                    f"return an empty array.\n"
+                    f"    When an item has a countable prescription, also include "
+                    f"integer 'sets' and 'reps' so the athlete can log what they "
+                    f"actually did against it. Reps means repetitions for lifting, "
+                    f"or intervals for conditioning. Omit both for anything not "
+                    f"countable - a 20 minute easy run has neither. Never invent "
+                    f"numbers to fill the fields.\n"
                     f"  readiness_score - integer 0-100 matching your read above. "
                     f"Under 40 is poor, 40-64 moderate, 65+ good. The app colours "
                     f"the day by this, so it must agree with what you wrote.\n"
@@ -119,5 +125,15 @@ def _clean_items(raw: object) -> list[dict[str, str]] | None:
         if not item_id or not text or item_id in seen:
             continue
         seen.add(item_id)
-        out.append({"id": item_id, "text": text[:120]})
+        item: dict[str, object] = {"id": item_id, "text": text[:120]}
+        # Sets and reps are optional and often absent — a 20 minute easy run has
+        # neither. Only kept when they are sane positive integers, so a model
+        # hallucinating "sets": "a few" cannot reach the UI as a broken stepper.
+        for field in ("sets", "reps"):
+            value = entry.get(field)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)) and 1 <= int(value) <= 200:
+                item[field] = int(value)
+        out.append(item)
     return out or None
