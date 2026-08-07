@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.ai.data import gather_recent, user_profile
 from app.ai.prompts import SYSTEM_PROMPT, user_context_block
 from app.config import settings
+from app.dates import today_for
 from app.models import DailyBrief, User
 
 
@@ -19,7 +20,10 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
     client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
     snap = gather_recent(db, user, days=14)
     profile = user_profile(user, snap.get("goal"))
-    target_day = day or date.today()
+    # The athlete's today. On UTC infrastructure date.today() rolls over
+    # mid-evening for anyone west of Greenwich, and a brief dated tomorrow
+    # never shows up on the day it was written for.
+    target_day = day or today_for(user)
 
     resp = client.messages.create(
         model=cfg.anthropic_model_default,

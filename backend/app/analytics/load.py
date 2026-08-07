@@ -31,7 +31,8 @@ from typing import Literal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import BodyMetric, Workout
+from app.dates import local_day, zone_for
+from app.models import BodyMetric, User, Workout
 
 Method = Literal["trimp", "duration"]
 
@@ -137,15 +138,22 @@ def daily_loads(
 ) -> dict[date, tuple[float, Method]]:
     """Total load per calendar day, and whether any of it was estimated.
 
+    Days are the athlete's own, not UTC. An 8pm workout in Boston is already
+    tomorrow in UTC, so grouping on the raw timestamp files evening sessions
+    against the wrong day — which then shifts the whole calendar.
+
     A day is marked "duration" if *any* of its sessions lacked heart rate: the
     total is then partly a guess, and saying so is the honest signal.
     """
+    tz = zone_for(db.get(User, user_id))
+    # Widened a day on each side before filtering locally: a workout inside the
+    # local window can sit outside it in UTC, and the SQL comparison is UTC.
     workouts = (
         db.query(Workout)
         .filter(
             Workout.user_id == user_id,
-            func.date(Workout.started_at) >= start,
-            func.date(Workout.started_at) <= end,
+            func.date(Workout.started_at) >= start - timedelta(days=1),
+            func.date(Workout.started_at) <= end + timedelta(days=1),
         )
         .all()
     )
@@ -153,7 +161,9 @@ def daily_loads(
 
     out: dict[date, tuple[float, Method]] = {}
     for w in workouts:
-        day = w.started_at.date()
+        day = local_day(w.started_at, tz)
+        if day < start or day > end:
+            continue
         load, method = workout_load(w, hr)
         prev_load, prev_method = out.get(day, (0.0, "trimp"))
         combined: Method = "duration" if "duration" in (prev_method, method) else "trimp"

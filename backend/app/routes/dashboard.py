@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.brief import generate_daily_brief
 from app.auth.deps import current_user
+from app.dates import today_for
 from app.db import get_db
 from app.models import DailyBrief, DayLog, HRVReading, SleepSession, User, Workout
 
@@ -47,7 +48,10 @@ class TodayBrief(BaseModel):
 
 @router.get("/today", response_model=TodayBrief)
 def today(user: User = Depends(current_user), db: Session = Depends(get_db)) -> TodayBrief:
-    today_ = date.today()
+    # The user's today, not the server's. On Fly the server is UTC, which
+    # rolls over at 7pm in Boston — the dashboard would start asking for a
+    # brief that does not exist yet and fall back to yesterday's.
+    today_ = today_for(user)
     brief = (
         db.query(DailyBrief)
         .filter(DailyBrief.user_id == user.id)

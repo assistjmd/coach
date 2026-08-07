@@ -48,10 +48,17 @@ struct DayEntry: Decodable, Identifiable {
     var estimated: Bool { loadMethod != "trimp" }
     var date: Date? { DayEntry.parser.date(from: day) }
 
+    /// Parsed in the device's zone, deliberately.
+    ///
+    /// The server sends a bare calendar day. Parsing it at UTC midnight and then
+    /// rendering with `.formatted` — which uses the *current* zone — labels every
+    /// day one earlier for anyone west of Greenwich: "2026-08-07" becomes 8pm on
+    /// the 6th in Boston, and the whole calendar reads a day behind. Anchoring to
+    /// local midnight makes the label match the day the server meant.
     private static let parser: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.timeZone = .current
         f.dateFormat = "yyyy-MM-dd"
         return f
     }()
@@ -240,7 +247,10 @@ struct InsightsView: View {
         guard let start = cal.date(byAdding: .day, value: -window, to: end) else { return }
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = TimeZone(secondsFromGMT: 0)
+        // The device's zone: formatting `Date()` at UTC asks for a window ending
+        // tomorrow once it is past 7pm in Boston, which pushes today off the end
+        // of the calendar.
+        f.timeZone = .current
         do {
             response = try await APIClient.shared.get(
                 "/v1/insights/calendar?start=\(f.string(from: start))&end=\(f.string(from: end))"

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.analytics import compliance as comp
 from app.analytics.load import daily_loads
 from app.auth.deps import current_user
+from app.dates import local_day, zone_for
 from app.db import get_db
 from app.models import DailyBrief, DayLog, User, Workout
 
@@ -151,10 +152,16 @@ def _day_context(db: Session, user: User, day: date):
     load, method = daily_loads(db, user.id, day, day).get(day, (0.0, "trimp"))
     workouts = (
         db.query(Workout)
-        .filter(Workout.user_id == user.id, func.date(Workout.started_at) == day)
+        .filter(
+            Workout.user_id == user.id,
+            func.date(Workout.started_at) >= day - timedelta(days=1),
+            func.date(Workout.started_at) <= day + timedelta(days=1),
+        )
         .order_by(Workout.started_at)
         .all()
     )
+    tz = zone_for(user)
+    workouts = [w for w in workouts if local_day(w.started_at, tz) == day]
     return brief, log, load, method, workouts
 
 
@@ -190,17 +197,23 @@ def calendar(
         )
     }
 
+    # Grouped by the athlete's local day, and widened by one day on each side
+    # so a session that is inside the local window but outside it in UTC is not
+    # dropped by the SQL comparison.
+    tz = zone_for(user)
     workouts_by_day: dict[date, list[Workout]] = {}
     for w in (
         db.query(Workout)
         .filter(
             Workout.user_id == user.id,
-            func.date(Workout.started_at) >= start,
-            func.date(Workout.started_at) <= end,
+            func.date(Workout.started_at) >= start - timedelta(days=1),
+            func.date(Workout.started_at) <= end + timedelta(days=1),
         )
         .order_by(Workout.started_at)
     ):
-        workouts_by_day.setdefault(w.started_at.date(), []).append(w)
+        day = local_day(w.started_at, tz)
+        if start <= day <= end:
+            workouts_by_day.setdefault(day, []).append(w)
 
     # The athlete's own median training day, used to tell a full session from a
     # token one. Median over non-zero days: including rest days would drag the
