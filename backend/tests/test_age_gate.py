@@ -9,12 +9,19 @@ from datetime import date, timedelta
 
 import pytest
 
+from app.dates import today_for
 from app.models import LegalConsent, User
 from app.routes.me import CURRENT_LEGAL_VERSION, MINIMUM_AGE, _age_on
 
 
-def _dob_years_ago(years: int, days: int = 0) -> str:
-    return (date.today() - timedelta(days=years * 365.25 + days)).isoformat()
+def _dob_years_ago(user, years: int, days: int = 0) -> str:
+    """Relative to the *user's* today, not the machine's.
+
+    The server resolves "today" in the account's timezone. A test that builds
+    its dates from the runner's local clock disagrees with it for part of every
+    day — which is the same bug this whole area exists to fix.
+    """
+    return (today_for(user) - timedelta(days=years * 365.25 + days)).isoformat()
 
 
 def test_age_arithmetic_handles_an_unreached_birthday():
@@ -41,7 +48,7 @@ def test_under_sixteen_is_refused_and_no_consent_is_recorded(client, auth, db, u
     resp = client.post(
         "/v1/me/consent",
         headers=auth,
-        json={"version": CURRENT_LEGAL_VERSION, "date_of_birth": _dob_years_ago(12)},
+        json={"version": CURRENT_LEGAL_VERSION, "date_of_birth": _dob_years_ago(user, 12)},
     )
     assert resp.status_code == 403
     assert str(MINIMUM_AGE) in resp.json()["detail"]
@@ -53,9 +60,10 @@ def test_under_sixteen_is_refused_and_no_consent_is_recorded(client, auth, db, u
     assert user.date_of_birth is None
 
 
-def test_exactly_sixteen_today_is_allowed(client, auth):
+def test_exactly_sixteen_today_is_allowed(client, auth, user):
     """Boundary in the user's favour — 16 means 16, not 16 and a day."""
-    sixteenth = date.today().replace(year=date.today().year - MINIMUM_AGE)
+    today = today_for(user)
+    sixteenth = today.replace(year=today.year - MINIMUM_AGE)
     resp = client.post(
         "/v1/me/consent",
         headers=auth,
@@ -72,13 +80,16 @@ def test_missing_date_of_birth_is_rejected(client, auth):
     assert resp.status_code == 400
 
 
-def test_future_date_of_birth_is_rejected(client, auth):
+def test_future_date_of_birth_is_rejected(client, auth, user):
     resp = client.post(
         "/v1/me/consent",
         headers=auth,
         json={
             "version": CURRENT_LEGAL_VERSION,
-            "date_of_birth": (date.today() + timedelta(days=1)).isoformat(),
+            # Tomorrow in the account's timezone. Built from the runner's clock
+            # this lands on today for part of every day, and the request is then
+            # refused as under-16 instead of as future-dated.
+            "date_of_birth": (today_for(user) + timedelta(days=1)).isoformat(),
         },
     )
     assert resp.status_code == 400

@@ -14,6 +14,7 @@ from datetime import date, timedelta
 
 import pytest
 
+from app.dates import today_for
 from app.models import DailyBrief, SleepSession
 
 
@@ -76,7 +77,8 @@ def test_generates_on_demand_when_data_exists(client, db, user, auth, fake_claud
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["readiness_summary"].startswith("HRV is steady")
-    assert body["day"] == date.today().isoformat()
+    # The account's today, which is what the endpoint now resolves.
+    assert body["day"] == today_for(user).isoformat()
     assert body["stale"] is False
     assert len(fake_claude) == 1
     # and it was persisted, not just returned

@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import urllib.parse
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -175,41 +176,84 @@ def _token_from_response(
     )
 
 
+@dataclass(frozen=True)
+class _Type:
+    """How to address one data type.
+
+    The two spellings are not interchangeable and there is no way to derive one
+    call from the other, so both are written out:
+
+    `path` is kebab-case and goes in the URL. `field` is the snake_case name
+    plus the time field for that record's shape — Sessions and Intervals are
+    filtered on `interval.start_time`, Samples on `sample_time.physical_time`,
+    and Dailies on a bare `date`. Filtering a Sample as though it were a Session
+    is a 400 with no explanation of which half was wrong.
+    """
+
+    path: str
+    field: str
+    # Dailies take a calendar date, not a timestamp. Sending RFC-3339 to one is
+    # rejected.
+    date_only: bool = False
+
+
+_EXERCISE = _Type("exercise", "exercise.interval.start_time")
+_SLEEP = _Type("sleep", "sleep.interval.start_time")
+_HRV = _Type(
+    "heart-rate-variability",
+    "heart_rate_variability.sample_time.physical_time",
+)
+_RESTING_HR = _Type("daily-resting-heart-rate", "daily_resting_heart_rate.date", date_only=True)
+
+
 def _points(
     client: httpx.Client,
-    data_type: str,
+    spec: _Type,
     since: datetime,
     until: datetime,
 ) -> Iterable[dict[str, Any]]:
     """Page through one data type's points.
 
-    `data_type` is kebab-case here because it goes in the path. The snake_case
-    spelling is only for filter parameters — see the module docstring.
+    Time ranges go in a single AIP-160 `filter` expression. There are no
+    `startTime`/`endTime` parameters, and Google's gateway answers an unknown
+    query parameter with a bare 400 that names nothing — which is why the
+    response body is logged below rather than left to `raise_for_status`.
     """
+    if spec.date_only:
+        lo, hi = since.date().isoformat(), until.date().isoformat()
+    else:
+        lo = since.isoformat().replace("+00:00", "Z")
+        hi = until.isoformat().replace("+00:00", "Z")
+    # Half-open, matching the operators the API supports: >= and <.
+    filter_expr = f'{spec.field} >= "{lo}" AND {spec.field} < "{hi}"'
+
     page_token: str | None = None
-    # The API is generous with page size but a runaway loop on a malformed
-    # cursor would hammer it. 50 pages is far past any real 30-day window.
+    # A runaway loop on a malformed cursor would hammer the API. 50 pages at
+    # 1000 each is far past any real 30-day window.
     for _ in range(50):
-        params: dict[str, Any] = {
-            "startTime": since.isoformat().replace("+00:00", "Z"),
-            "endTime": until.isoformat().replace("+00:00", "Z"),
-            "pageSize": 200,
-        }
+        params: dict[str, Any] = {"filter": filter_expr, "pageSize": 1000}
         if page_token:
             params["pageToken"] = page_token
-        r = client.get(f"{_API_BASE}/users/me/dataTypes/{data_type}/dataPoints", params=params)
+        r = client.get(
+            f"{_API_BASE}/users/me/dataTypes/{spec.path}/dataPoints", params=params
+        )
         if r.status_code == 403:
             # Scope not granted. One missing permission must not abort the whole
             # sync — the other three data types are still worth having.
-            log.warning("google_health: no access to %s", data_type)
+            log.warning("google_health: no access to %s", spec.path)
             return
+        if r.is_error:
+            # The body carries the actual reason; the status alone does not.
+            log.error(
+                "google_health: %s on %s — %s", r.status_code, spec.path, r.text[:500]
+            )
         r.raise_for_status()
         body = r.json()
         yield from body.get("dataPoints", [])
         page_token = body.get("nextPageToken")
         if not page_token:
             return
-    log.warning("google_health: page cap hit for %s", data_type)
+    log.warning("google_health: page cap hit for %s", spec.path)
 
 
 def _pid(point: dict[str, Any], suffix: str = "") -> str:
@@ -226,7 +270,7 @@ def _pid(point: dict[str, Any], suffix: str = "") -> str:
 def _sync_exercise(
     c: httpx.Client, since: datetime, until: datetime
 ) -> Iterable[NormalizedRecord]:
-    for p in _points(c, "exercise", since, until):
+    for p in _points(c, _EXERCISE, since, until):
         v = p.get("value") or {}
         yield NormalizedRecord(
             kind="workout",
@@ -246,7 +290,7 @@ def _sync_exercise(
 def _sync_sleep(
     c: httpx.Client, since: datetime, until: datetime
 ) -> Iterable[NormalizedRecord]:
-    for p in _points(c, "sleep", since, until):
+    for p in _points(c, _SLEEP, since, until):
         v = p.get("value") or {}
         yield NormalizedRecord(
             kind="sleep",
@@ -267,7 +311,7 @@ def _sync_sleep(
 def _sync_hrv(
     c: httpx.Client, since: datetime, until: datetime
 ) -> Iterable[NormalizedRecord]:
-    for p in _points(c, "heart-rate-variability", since, until):
+    for p in _points(c, _HRV, since, until):
         v = p.get("value") or {}
         # Google reports HRV as RMSSD, same measure as Oura. Storing an SDNN
         # value in this column alongside RMSSD would make the trend meaningless,
@@ -285,7 +329,7 @@ def _sync_hrv(
 def _sync_resting_hr(
     c: httpx.Client, since: datetime, until: datetime
 ) -> Iterable[NormalizedRecord]:
-    for p in _points(c, "daily-resting-heart-rate", since, until):
+    for p in _points(c, _RESTING_HR, since, until):
         v = p.get("value") or {}
         bpm = v.get("bpm") or v.get("beatsPerMinute")
         if bpm is None:

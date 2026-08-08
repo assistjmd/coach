@@ -53,16 +53,57 @@ def test_refresh_prefers_a_newly_issued_token():
     assert fresh.refresh_token == "rotated"
 
 
-def _mock(routes: dict[str, dict]):
+def _mock(routes: dict[str, dict], seen: list | None = None):
     """Serve canned dataPoints keyed by the kebab-case type in the path."""
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if seen is not None:
+            seen.append(request.url)
         for data_type, body in routes.items():
             if f"/dataTypes/{data_type}/" in request.url.path:
                 return httpx.Response(200, json=body)
         return httpx.Response(200, json={"dataPoints": []})
 
     return httpx.MockTransport(handler)
+
+
+def test_time_range_uses_a_filter_expression(provider, monkeypatch):
+    """The bug that broke the first real connection.
+
+    There are no startTime/endTime parameters. Google's gateway answers an
+    unknown query parameter with a bare 400 that names nothing, so this is
+    pinned here rather than discovered again in production.
+    """
+    seen: list = []
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        httpx, "Client", lambda **kw: real_client(**{**kw, "transport": _mock({}, seen)})
+    )
+    list(provider.sync(TokenSet("tok", "ref", None), SINCE, UNTIL))
+
+    by_path = {u.path.rsplit("/dataTypes/", 1)[1]: u for u in seen}
+
+    for url in seen:
+        assert "startTime" not in url.params, "startTime is not a real parameter"
+        assert "endTime" not in url.params, "endTime is not a real parameter"
+        assert url.params.get("filter"), "every request needs a filter expression"
+
+    # Sessions filter on the interval; the type name is snake_case in a filter
+    # even though the path is kebab-case.
+    assert by_path["exercise/dataPoints"].params["filter"] == (
+        'exercise.interval.start_time >= "2026-08-01T00:00:00Z" '
+        'AND exercise.interval.start_time < "2026-08-07T00:00:00Z"'
+    )
+    # Samples filter on sample_time, not interval.
+    assert by_path["heart-rate-variability/dataPoints"].params["filter"] == (
+        'heart_rate_variability.sample_time.physical_time >= "2026-08-01T00:00:00Z" '
+        'AND heart_rate_variability.sample_time.physical_time < "2026-08-07T00:00:00Z"'
+    )
+    # Dailies take a bare calendar date. Sending a timestamp is rejected.
+    assert by_path["daily-resting-heart-rate/dataPoints"].params["filter"] == (
+        'daily_resting_heart_rate.date >= "2026-08-01" '
+        'AND daily_resting_heart_rate.date < "2026-08-07"'
+    )
 
 
 def test_sync_normalizes_each_kind(provider, monkeypatch):
