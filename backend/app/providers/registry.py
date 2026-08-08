@@ -1,10 +1,11 @@
 from app.config import settings
-from app.providers.announced import GARMIN, GOOGLE_HEALTH
+from app.providers.announced import GARMIN, GOOGLE_HEALTH, WAHOO
 from app.providers.base import Provider
 from app.providers.google_health import GoogleHealthProvider
 from app.providers.healthkit import HealthKitProvider
 from app.providers.oura import OuraProvider
 from app.providers.strava import StravaProvider
+from app.providers.wahoo import WahooProvider
 
 _PROVIDERS: dict[str, Provider] = {
     "oura": OuraProvider(),
@@ -22,6 +23,9 @@ _PROVIDERS: dict[str, Provider] = {
 # they had already left the app for Google's consent screen.
 _PROVIDERS["google_health"] = (
     GoogleHealthProvider() if settings().google_health_client_id else GOOGLE_HEALTH
+)
+_PROVIDERS["wahoo"] = (
+    WahooProvider() if settings().wahoo_client_id else WAHOO
 )
 
 if settings().app_env == "dev":

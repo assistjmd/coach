@@ -68,6 +68,13 @@ GARMIN = AnnouncedProvider(
     "turn this on the day they approve us.",
 )
 
+WAHOO = AnnouncedProvider(
+    slug="wahoo",
+    display_name="Wahoo",
+    note="Requested by a tester with an ELEMNT. Wahoo approves each app by "
+    "hand — the integration is built and waiting on them.",
+)
+
 GOOGLE_HEALTH = AnnouncedProvider(
     slug="google_health",
     display_name="Google Health",

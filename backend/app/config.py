@@ -71,6 +71,8 @@ class Settings(BaseSettings):
 
     # Fitbit's own Web API is turned down in September 2026; its replacement is
     # the Google Health API, which uses Google OAuth rather than Fitbit's.
+    wahoo_client_id: str = ""
+    wahoo_client_secret: str = ""
     google_health_client_id: str = ""
     google_health_client_secret: str = ""
     # Empty means "derive from public_base_url" — see providers.base.redirect_uri_for.

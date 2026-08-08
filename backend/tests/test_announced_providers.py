@@ -14,7 +14,7 @@ from app.providers.announced import NotYetAvailable
 
 # Garmin only. Google Health flips to the real provider as soon as its
 # credentials exist — see `test_google_health_is_announced_only_without_creds`.
-ANNOUNCED = ("garmin",)
+ANNOUNCED = ("garmin", "wahoo")
 
 
 @pytest.mark.parametrize("slug", ANNOUNCED)

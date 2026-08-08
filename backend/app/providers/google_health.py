@@ -176,6 +176,35 @@ def _token_from_response(
     )
 
 
+class AccountNotLinked(RuntimeError):
+    """The Google account has never been set up with Google Health.
+
+    Granting OAuth consent and *having a Google Health account* are two separate
+    things, and nothing on the consent screen says so. Every Google user can
+    authorize us; only those who have completed Fitbit/Google Health signup have
+    anything behind it.
+
+    Raised as its own type so the message reaching the user is an instruction
+    rather than `HTTPStatusError: Client error '400 Bad Request' for url ...`.
+    """
+
+
+def _raise_if_unlinked(r: httpx.Response) -> None:
+    """Turn Google's FAILED_PRECONDITION into something a person can act on."""
+    try:
+        err = r.json().get("error", {})
+    except ValueError:
+        return
+    reasons = {
+        d.get("reason") for d in err.get("details", []) if isinstance(d, dict)
+    }
+    if err.get("status") == "FAILED_PRECONDITION" or "ACCOUNT_NOT_LINKED" in reasons:
+        raise AccountNotLinked(
+            "This Google account isn't set up with Google Health yet. "
+            "Finish signup at fitbit.google.com, then reconnect."
+        )
+
+
 @dataclass(frozen=True)
 class _Type:
     """How to address one data type.
@@ -247,6 +276,7 @@ def _points(
             log.error(
                 "google_health: %s on %s — %s", r.status_code, spec.path, r.text[:500]
             )
+            _raise_if_unlinked(r)
         r.raise_for_status()
         body = r.json()
         yield from body.get("dataPoints", [])
