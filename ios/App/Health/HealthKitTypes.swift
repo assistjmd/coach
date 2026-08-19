@@ -16,6 +16,16 @@ enum HealthKitTypes {
         .respiratoryRate,
         .oxygenSaturation,
         .appleSleepingWristTemperature,
+        // Nutrition. MyFitnessPal, Cronometer and Lose It all write here, which
+        // is how we read a food log without a partnership with any of them —
+        // MyFitnessPal closed its public API in 2019 and does not accept new
+        // developers. Absent for anyone not logging food, and that is fine: the
+        // queries simply return nothing.
+        .dietaryEnergyConsumed,
+        .dietaryProtein,
+        .dietaryCarbohydrates,
+        .dietaryFatTotal,
+        .dietaryWater,
     ]
 
     static let categoryIdentifiers: [HKCategoryTypeIdentifier] = [.sleepAnalysis]

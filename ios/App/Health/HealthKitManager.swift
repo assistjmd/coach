@@ -296,6 +296,12 @@ final class HealthKitManager: ObservableObject {
             (.stepCount, "steps", .count()),
             (.activeEnergyBurned, "active_energy_kcal", .kilocalorie()),
             (.appleExerciseTime, "exercise_minutes", .minute()),
+            // Intake, written by whichever food logger the athlete uses.
+            (.dietaryEnergyConsumed, "dietary_energy_kcal", .kilocalorie()),
+            (.dietaryProtein, "protein_g", .gram()),
+            (.dietaryCarbohydrates, "carbs_g", .gram()),
+            (.dietaryFatTotal, "fat_g", .gram()),
+            (.dietaryWater, "water_ml", .literUnit(with: .milli)),
         ]
         var out: [HKBodyMetricDTO] = []
         for (identifier, name, unit) in wanted {

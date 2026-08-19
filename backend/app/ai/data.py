@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     BodyMetric,
+    DailyBrief,
+    DayLog,
     Goal,
     HeartRateSample,
     HRVReading,
@@ -46,7 +48,65 @@ def gather_recent(db: Session, user: User, days: int = 14) -> dict[str, Any]:
         ).scalars()],
         "resting_hr_recent": _resting_hr(db, user, cutoff),
         "goal": _goal(db, user),
+        "recent_sessions": _recent_sessions(db, user, days=10),
     }
+
+
+def _recent_sessions(db: Session, user: User, days: int = 10) -> list[dict]:
+    """What was prescribed lately, and what the athlete actually did about it.
+
+    Without this the coach writes every brief from a blank slate. It cannot see
+    that it asked for back squats three sessions running, so it keeps asking —
+    which is exactly how a plan ends up with no variety. Provider data does not
+    fill the gap: a Strava strength workout is a duration and a heart rate, with
+    no record of which lifts were performed.
+
+    The logged sets and reps matter as much as the prescription. Knowing they
+    did 4x6 where 3x8 was asked is what turns the next session into progression
+    rather than a repeat.
+    """
+    from app.dates import today_for
+
+    start = today_for(user) - timedelta(days=days)
+    briefs = db.execute(
+        select(DailyBrief)
+        .where(DailyBrief.user_id == user.id, DailyBrief.day >= start)
+        .order_by(DailyBrief.day.desc())
+    ).scalars().all()
+    logs = {
+        entry.day: entry
+        for entry in db.execute(
+            select(DayLog).where(DayLog.user_id == user.id, DayLog.day >= start)
+        ).scalars()
+    }
+
+    out = []
+    for b in briefs:
+        log = logs.get(b.day)
+        done = set(log.completed_items or []) if log else set()
+        actuals = (log.item_actuals or {}) if log else {}
+        items = []
+        for i in (b.session_items or []):
+            if not isinstance(i, dict) or not i.get("id"):
+                continue
+            entry = {
+                "text": i.get("text"),
+                "prescribed_sets": i.get("sets"),
+                "prescribed_reps": i.get("reps"),
+                "completed": i["id"] in done,
+            }
+            actual = actuals.get(i["id"])
+            if isinstance(actual, dict) and actual:
+                entry["actually_did"] = actual
+            items.append(entry)
+        out.append({
+            "day": b.day.isoformat(),
+            "prescribed": b.training_prescription,
+            "was_training_day": b.session_planned,
+            "items": items,
+            "athlete_notes": (log.journal if log else None),
+        })
+    return out
 
 
 def _workout(w: Workout) -> dict:

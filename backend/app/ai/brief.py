@@ -47,13 +47,20 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
                     f"  training_prescription - your call for today, specific enough to act on "
                     f"(sets, duration, intensity). State it in the first person.\n"
                     f"  rationale - one sentence on why. Not a paragraph.\n"
-                    f"  session_items - array of 1-5 objects. Each has 'id' (a "
+                    f"  session_items - array of 1-8 objects. A lifting day needs "
+                    f"more of them than a run: warm-up, each exercise as its own "
+                    f"item, and a finisher. Name the exercise in every item - "
+                    f"'Romanian deadlift, 3x8', never 'accessory work'. Each has 'id' (a "
                     f"short lowercase slug, no spaces) and 'text' (one concrete "
                     f"thing to do, under 60 characters). These become checkboxes, "
                     f"so each must be a single action the athlete can tick off - "
                     f"'3x8 at threshold', not 'do your session'. Split warm-up, "
                     f"main set and cool-down into separate items. On a rest day "
                     f"return an empty array.\n"
+                    f"    Check recent_sessions in the data before choosing "
+                    f"exercises. Do not prescribe the same lift two sessions "
+                    f"running unless they are mid-progression on it or they "
+                    f"skipped it last time.\n"
                     f"    When an item has a countable prescription, also include "
                     f"integer 'sets' and 'reps' so the athlete can log what they "
                     f"actually did against it. Reps means repetitions for lifting, "
@@ -109,6 +116,9 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
     return brief
 
 
+_MAX_SESSION_ITEMS = 8
+
+
 def _clean_items(raw: object) -> list[dict[str, str]] | None:
     """Validate the model's checkbox items before they reach the database.
 
@@ -121,7 +131,10 @@ def _clean_items(raw: object) -> list[dict[str, str]] | None:
         return None
     out: list[dict[str, str]] = []
     seen: set[str] = set()
-    for entry in raw[:5]:
+    # Eight, not five. A lifting day is a warm-up, three or four named
+    # exercises and a finisher; capping at five silently truncated the
+    # accessory work and made every session look thinner than prescribed.
+    for entry in raw[:_MAX_SESSION_ITEMS]:
         if not isinstance(entry, dict):
             continue
         item_id = str(entry.get("id") or "").strip().lower().replace(" ", "_")
