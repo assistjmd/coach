@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key>
+  <string>app-store-connect</string>
+  <key>teamID</key>
+  <string>2VDRZ5H7UR</string>
+  <key>uploadSymbols</key>
+  <true/>
+  <!-- Manual, against the distribution profile created via the API. Automatic
+       signing needs Xcode's cloud-signing permission, which this account does
+       not have, and the failure only surfaces at export after a full archive. -->
+  <key>signingStyle</key>
+  <string>manual</string>
+  <key>provisioningProfiles</key>
+  <dict>
+    <key>com.trainwithcoach.app</key>
+    <string>Coach Will App Store</string>
+  </dict>
+</dict>
+</plist>
