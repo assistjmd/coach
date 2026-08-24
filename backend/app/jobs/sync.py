@@ -21,7 +21,8 @@ from app.models import (
     Workout,
 )
 from app.providers import get_provider
-from app.providers.base import NormalizedRecord
+from app.providers.base import NormalizedRecord, ReauthRequired
+from app.providers.google_health import AccountNotLinked
 from app.routes.providers import load_tokenset
 
 log = logging.getLogger("coach.sync")
@@ -76,9 +77,13 @@ def sync_one(token_id) -> int:
         with SessionLocal() as db:
             tok = db.get(OAuthToken, token_id)
             if tok is not None:
-                # Truncated and type-prefixed: this is surfaced to a user, and a
-                # full provider traceback is neither useful nor safe to show.
-                tok.last_sync_error = f"{type(exc).__name__}: {exc}"[:300]
+                # Errors written for the athlete are shown as written. Everything
+                # else is type-prefixed, because "400 Bad Request" alone gives a
+                # user nothing and the class name is at least a starting point.
+                if isinstance(exc, ReauthRequired | AccountNotLinked):
+                    tok.last_sync_error = str(exc)[:300]
+                else:
+                    tok.last_sync_error = f"{type(exc).__name__}: {exc}"[:300]
                 db.commit()
         raise
 

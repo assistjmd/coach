@@ -23,6 +23,16 @@ NormalizedKind = Literal[
 ]
 
 
+class ReauthRequired(RuntimeError):
+    """The stored grant is dead and only the athlete can fix it.
+
+    Distinct from a transient failure because the retry that fixes a network
+    blip will never fix this one. The message is written for the athlete — it
+    is surfaced verbatim on the Sources row — so it says what to do rather than
+    what went wrong.
+    """
+
+
 @dataclass
 class TokenSet:
     access_token: str

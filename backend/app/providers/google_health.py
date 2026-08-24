@@ -38,6 +38,7 @@ from app.config import settings
 from app.providers.base import (
     NormalizedRecord,
     ProviderInfo,
+    ReauthRequired,
     TokenSet,
     redirect_uri_for,
 )
@@ -118,7 +119,7 @@ class GoogleHealthProvider:
                     "client_secret": cfg.google_health_client_secret,
                 },
             )
-            r.raise_for_status()
+            _check_token_response(r)
             return _token_from_response(r.json())
 
     def refresh(self, token: TokenSet) -> TokenSet:
@@ -135,7 +136,7 @@ class GoogleHealthProvider:
                     "client_secret": cfg.google_health_client_secret,
                 },
             )
-            r.raise_for_status()
+            _check_token_response(r)
             data = r.json()
             # A refresh response omits the refresh token. Carrying the old one
             # forward is required — dropping it turns a renewable connection
@@ -174,6 +175,30 @@ def _token_from_response(
         expires_at=expires_at,
         scope=data.get("scope"),
     )
+
+
+def _check_token_response(r: httpx.Response) -> None:
+    """Raise something meaningful when the token endpoint refuses.
+
+    `invalid_grant` here is nearly always Google's seven-day revocation for
+    OAuth apps whose publishing status is still Testing. It is not recoverable
+    by retrying, and the athlete cannot act on `HTTPStatusError: 400 Bad
+    Request` — which is all this used to produce, because the body was never
+    logged on the token endpoint the way it is on the data calls.
+    """
+    if not r.is_error:
+        return
+    body = r.text[:400]
+    log.error("google_health: %s from token endpoint — %s", r.status_code, body)
+    try:
+        err = r.json().get("error")
+    except ValueError:
+        err = None
+    if err in ("invalid_grant", "unauthorized_client"):
+        raise ReauthRequired(
+            "Google Health needs reconnecting. Tap Connect again on Sources."
+        )
+    r.raise_for_status()
 
 
 class AccountNotLinked(RuntimeError):
