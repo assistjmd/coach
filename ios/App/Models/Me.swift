@@ -14,9 +14,16 @@ struct ProviderRow: Decodable, Identifiable {
     let available: Bool?
     /// Why it isn't available, and what happens next.
     let note: String?
+    /// A route that works today despite the integration being unavailable.
+    /// Garmin Connect writes to Apple Health, so a Garmin user is not actually
+    /// blocked — they just have to be told how.
+    let workaroundTitle: String?
+    let workaroundSteps: [String]?
     var id: String { slug }
 
     var isAnnounced: Bool { available == false }
+    /// Whether there is a route that works today, despite no direct integration.
+    var hasWorkaround: Bool { !(workaroundSteps ?? []).isEmpty }
 }
 
 /// `GET /v1/me`. Also the app's launch-state check — see `SessionStore.bootstrap`.

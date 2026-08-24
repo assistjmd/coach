@@ -28,7 +28,14 @@ class AnnouncedProvider:
 
     scopes: list[str] = []
 
-    def __init__(self, slug: str, display_name: str, note: str):
+    def __init__(
+        self,
+        slug: str,
+        display_name: str,
+        note: str,
+        workaround_title: str | None = None,
+        workaround_steps: list[str] | None = None,
+    ):
         self.info = ProviderInfo(
             slug=slug,
             display_name=display_name,
@@ -36,6 +43,12 @@ class AnnouncedProvider:
             availability="coming_soon",
         )
         self.note = note
+        # A route that works today, where one exists. Garmin has no API access
+        # for us yet, but Garmin Connect writes to Apple Health, so the data can
+        # reach us anyway — telling the athlete that is worth more than making
+        # them wait for an approval they cannot influence.
+        self.workaround_title = workaround_title
+        self.workaround_steps = workaround_steps or []
 
     def _refuse(self):
         raise NotYetAvailable(f"{self.info.display_name} is not connectable yet")
@@ -64,8 +77,20 @@ class AnnouncedProvider:
 GARMIN = AnnouncedProvider(
     slug="garmin",
     display_name="Garmin",
-    note="Developer access requested. Garmin reviews each app by hand — we'll "
-    "turn this on the day they approve us.",
+    note="Direct sync is pending Garmin's approval. Until then your watch can "
+    "reach Coach Will through Apple Health, and it takes about a minute to "
+    "set up.",
+    workaround_title="Connect Garmin through Apple Health",
+    workaround_steps=[
+        "Open the Garmin Connect app.",
+        "Tap the ☰ menu (bottom right), then Settings.",
+        "Tap Apple Health, then turn on Enable Apple Health.",
+        "Tap Turn All Categories On when Apple asks what to share, then Allow.",
+        "Come back here and connect Apple Health if you have not already.",
+        "Garmin writes new activities and sleep to Apple Health as they sync. "
+        "History before today usually does not come across, so give it a day "
+        "or two to fill in.",
+    ],
 )
 
 WAHOO = AnnouncedProvider(

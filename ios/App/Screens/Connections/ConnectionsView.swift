@@ -105,6 +105,7 @@ private struct ProviderRowView: View {
     let run: (@escaping () async throws -> String?) async -> Void
 
     @EnvironmentObject var health: HealthKitManager
+    @State private var showingWorkaround = false
 
     var body: some View {
         Panel(accent: isLive ? Theme.Palette.accent : nil) {
@@ -129,10 +130,21 @@ private struct ProviderRowView: View {
                 }
             }
         }
-        // Dimmed rather than hidden. A Garmin user who sees only Oura and Strava
-        // concludes their watch is unsupported and leaves; seeing it listed and
-        // pending is the difference between "not for me" and "not yet".
-        .opacity(p.isAnnounced ? 0.65 : 1)
+        // Dimmed, but less so when there is something to do about it. A row the
+        // athlete can act on should not look as inert as one they cannot.
+        .opacity(p.isAnnounced && !p.hasWorkaround ? 0.6 : 1)
+        .contentShape(Rectangle())
+        .onTapGesture { if p.hasWorkaround { showingWorkaround = true } }
+        .sheet(isPresented: $showingWorkaround) {
+            WorkaroundSheet(
+                providerName: p.displayName,
+                title: p.workaroundTitle ?? "Set this up",
+                steps: p.workaroundSteps ?? [],
+                footnote: "Coach Will reads whatever lands in Apple Health, so "
+                    + "once this is on your watch data flows through without "
+                    + "anything else to set up."
+            )
+        }
     }
 
     private var soonChip: some View {
@@ -218,10 +230,15 @@ private struct ProviderRowView: View {
     @ViewBuilder
     private var actionControl: some View {
         if p.isAnnounced {
-            // No button at all. A disabled "Connect" invites tapping and then
-            // does nothing, which reads as a broken app rather than a pending
-            // integration.
-            EmptyView()
+            if p.hasWorkaround {
+                // There is a route that works today, so this row is not dead.
+                SmallButton(title: "How to") { showingWorkaround = true }
+            } else {
+                // No button at all. A disabled "Connect" invites tapping and
+                // then does nothing, which reads as a broken app rather than a
+                // pending integration.
+                EmptyView()
+            }
         } else if p.slug == "healthkit" {
             // The server reports HealthKit as "connected" for every user, since it
             // can't see the device's permission state. What it means locally is:

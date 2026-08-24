@@ -31,6 +31,11 @@ class ConnectedProvider(BaseModel):
     # Why it isn't available, and what happens next. Only set when available
     # is False.
     note: str | None = None
+    # A route that works today despite the integration being unavailable. Garmin
+    # Connect writes to Apple Health, so the data can arrive without Garmin ever
+    # approving us.
+    workaround_title: str | None = None
+    workaround_steps: list[str] = []
 
 
 class MeResponse(BaseModel):
@@ -66,6 +71,8 @@ def _me(user: User, db: Session) -> MeResponse:
             last_sync_error=tokens[p.info.slug].last_sync_error if p.info.slug in tokens else None,
             available=p.info.availability == "live",
             note=getattr(p, "note", None) if p.info.availability != "live" else None,
+            workaround_title=getattr(p, "workaround_title", None),
+            workaround_steps=list(getattr(p, "workaround_steps", []) or []),
         )
         for p in all_providers()
     ]

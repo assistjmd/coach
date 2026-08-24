@@ -37,6 +37,10 @@ class TodayBrief(BaseModel):
     training_prescription: str
     rationale: str | None
     flags: dict | None
+    # 0-100, and the number the home screen now leads with. It was computed and
+    # stored from the first brief onward but never sent to the client, so the
+    # app had prose about readiness and no way to show the score behind it.
+    readiness_score: int | None = None
     stale: bool = False
     # Today's session as tickable pieces, and which are already done. Carried
     # here as well as on the calendar because ticking off a session as you do it
@@ -109,6 +113,7 @@ def _as_response(
         training_prescription=brief.training_prescription,
         rationale=brief.rationale,
         flags=brief.flags,
+        readiness_score=brief.readiness_score,
         stale=stale,
         session_items=[
             SessionItem(

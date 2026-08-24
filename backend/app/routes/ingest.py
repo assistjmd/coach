@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from app.analytics.dedupe import better, collapse_existing, find_duplicate
 from app.auth.deps import current_user
 from app.db import get_db
 from app.models import (
@@ -86,6 +87,24 @@ class IngestSummary(BaseModel):
     body_metrics: int
 
 
+@router.post("/repair-duplicates")
+def repair_duplicates(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Collapse duplicate sessions already stored for this athlete.
+
+    The guards on the write paths only protect new data. Anyone who connected
+    Strava and Apple Health before those landed has a history where one session
+    appears several times, and the coach reads that history — so the inflated
+    load keeps driving the prescription until it is cleaned up.
+
+    Safe to run repeatedly: with nothing left to merge it removes nothing.
+    """
+    removed = collapse_existing(db, user.id)
+    return {"removed": removed}
+
+
 @router.post("/healthkit", response_model=IngestSummary)
 def ingest_healthkit(
     batch: HealthKitBatch,
@@ -95,25 +114,7 @@ def ingest_healthkit(
     src = "healthkit"
 
     written = IngestSummary(
-        workouts=_upsert(
-            db,
-            Workout,
-            "uq_workout_source_id",
-            lambda w: w.source_record_id,
-            batch.workouts,
-            lambda w: dict(
-                user_id=user.id,
-                source=src,
-                source_record_id=w.source_record_id,
-                sport=w.sport,
-                started_at=w.started_at,
-                ended_at=w.ended_at,
-                duration_s=w.duration_s,
-                distance_m=w.distance_m,
-                avg_hr=w.avg_hr,
-                max_hr=w.max_hr,
-            ),
-        ),
+        workouts=_ingest_workouts(db, user, batch.workouts, src),
         sleep=_upsert(
             db,
             SleepSession,
@@ -173,6 +174,59 @@ def ingest_healthkit(
         ),
     )
     db.commit()
+    return written
+
+
+def _ingest_workouts(db: Session, user: User, incoming, src: str) -> int:
+    """Write HealthKit workouts, collapsing sessions we already have.
+
+    Apple Health holds one HKWorkout per app that wrote it, so a single lift can
+    appear four times over — Garmin Connect, the Strava app, the Watch — each
+    with its own UUID. Those are indistinguishable to a per-source unique
+    constraint, and every extra copy inflated the day's training load.
+
+    Ordered by start time so that when a batch contains duplicates of each
+    other, the first is stored and the rest fold into it.
+    """
+    written = 0
+    for w in sorted(incoming, key=lambda x: x.started_at):
+        existing = find_duplicate(db, user.id, w.started_at, w.ended_at)
+        if existing is not None:
+            if existing.source == src and existing.source_record_id == w.source_record_id:
+                # Genuinely the same row; refresh the fields that can change.
+                existing.avg_hr = w.avg_hr or existing.avg_hr
+                existing.max_hr = w.max_hr or existing.max_hr
+                continue
+            candidate = Workout(
+                source=src, sport=w.sport, avg_hr=w.avg_hr,
+                max_hr=w.max_hr, distance_m=w.distance_m,
+            )
+            if better(candidate, existing):
+                existing.source = src
+                existing.source_record_id = w.source_record_id
+                existing.sport = w.sport or existing.sport
+                existing.started_at = w.started_at
+                existing.ended_at = w.ended_at
+                existing.duration_s = w.duration_s
+                existing.distance_m = w.distance_m or existing.distance_m
+                existing.avg_hr = w.avg_hr or existing.avg_hr
+                existing.max_hr = w.max_hr or existing.max_hr
+            continue
+
+        db.add(Workout(
+            user_id=user.id,
+            source=src,
+            source_record_id=w.source_record_id,
+            sport=w.sport,
+            started_at=w.started_at,
+            ended_at=w.ended_at,
+            duration_s=w.duration_s,
+            distance_m=w.distance_m,
+            avg_hr=w.avg_hr,
+            max_hr=w.max_hr,
+        ))
+        db.flush()
+        written += 1
     return written
 
 

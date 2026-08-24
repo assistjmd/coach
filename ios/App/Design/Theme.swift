@@ -2,10 +2,18 @@ import SwiftUI
 
 /// The design system.
 ///
-/// Direction is "athletic and physical": high contrast, heavy type, one
-/// saturated accent, square corners. The previous look was default SwiftUI —
-/// rounded cards on `.secondarySystemBackground` with SF Symbol labels — which
-/// reads as generic because every unstyled app looks that way.
+/// Calm and spacious, in the manner of Oura rather than Whoop. The previous
+/// direction was hard-edged and shouty — square corners, black condensed
+/// uppercase, tracked labels on everything — which made a rest day look as
+/// urgent as a threshold session. An app you open before you are properly awake
+/// should not shout.
+///
+/// What changed and why:
+/// - Corners are soft (18pt) and surfaces have no hairline. The border was
+///   doing the work of separating panels; space does that better.
+/// - Type is light-to-medium in sentence case. Uppercase tracking survives only
+///   on small labels, where it reads as a caption rather than a headline.
+/// - One number leads each screen, at size, with everything else quieter.
 ///
 /// Two rules worth keeping if this gets extended:
 /// 1. Numbers are always tabular (`monospacedDigit`). Readiness ticking from 61
@@ -16,19 +24,25 @@ enum Theme {
     // MARK: Palette
 
     enum Palette {
-        /// Near-black rather than pure black: gives surfaces something to lift off.
-        static let bg = Color(hex: 0x0A0C0E)
-        static let surface = Color(hex: 0x14181C)
-        static let surfaceHigh = Color(hex: 0x1E242A)
-        static let line = Color(hex: 0x2A3138)
+        /// Warm near-black. The old background was blue-cold, which made every
+        /// surface on top of it feel clinical.
+        static let bg = Color(hex: 0x0B0B0D)
+        static let surface = Color(hex: 0x161619)
+        static let surfaceHigh = Color(hex: 0x1F1F23)
+        /// Kept for the few places a divider genuinely helps. Panels no longer
+        /// use it — separation comes from space.
+        static let line = Color(hex: 0x2A2A2F)
 
-        static let text = Color(hex: 0xF2F5F7)
-        static let textDim = Color(hex: 0x8B98A5)
+        static let text = Color(hex: 0xF5F4F2)
+        /// Lifted from the old 0x8B98A5 so secondary text stays legible at the
+        /// lighter weights this direction uses.
+        static let textDim = Color(hex: 0x9A9AA2)
 
-        /// Brand accent — matches the app icon.
-        static let accent = Color(hex: 0x35E08D)
-        static let caution = Color(hex: 0xFFB020)
-        static let bad = Color(hex: 0xFF5A4E)
+        /// Brand accent, desaturated a step. The old green was pure signal
+        /// green and fought everything next to it.
+        static let accent = Color(hex: 0x5FD69B)
+        static let caution = Color(hex: 0xE8B268)
+        static let bad = Color(hex: 0xE87A6B)
 
         /// Colour for a readiness score. Thresholds match how the coach reads
         /// them, so the number and the prose never disagree.
@@ -44,28 +58,40 @@ enum Theme {
     // MARK: Type
 
     enum Font {
-        /// Big numerals. Tight tracking and tabular figures.
+        /// The one big number on a screen. Light rather than black — at 72pt a
+        /// heavy weight is a slab, and the size alone carries the emphasis.
         static func display(_ size: CGFloat = 72) -> SwiftUI.Font {
-            .system(size: size, weight: .black, design: .default)
+            .system(size: size, weight: .light, design: .rounded)
                 .monospacedDigit()
         }
 
         static func stat(_ size: CGFloat = 26) -> SwiftUI.Font {
-            .system(size: size, weight: .bold).monospacedDigit()
+            .system(size: size, weight: .medium, design: .rounded).monospacedDigit()
         }
 
-        static let sectionLabel = SwiftUI.Font.system(size: 11, weight: .heavy)
+        /// Small, tracked, uppercase. The only place uppercase survives — at 11pt
+        /// it reads as a caption, which is what a section label should be.
+        static let sectionLabel = SwiftUI.Font.system(size: 11, weight: .semibold)
         static let body = SwiftUI.Font.system(size: 16, weight: .regular)
-        static let bodyStrong = SwiftUI.Font.system(size: 17, weight: .semibold)
-        static let caption = SwiftUI.Font.system(size: 13, weight: .medium)
-        static let button = SwiftUI.Font.system(size: 16, weight: .heavy)
+        static let bodyStrong = SwiftUI.Font.system(size: 17, weight: .medium)
+        static let caption = SwiftUI.Font.system(size: 13, weight: .regular)
+        /// Sentence case, not shouted. See ActionButton.
+        static let button = SwiftUI.Font.system(size: 16, weight: .semibold)
+        /// Headline prose — the coach's actual words. Serif would be a step too
+        /// far, but the rounded face keeps it from reading like a system alert.
+        static func headline(_ size: CGFloat = 22) -> SwiftUI.Font {
+            .system(size: size, weight: .regular, design: .rounded)
+        }
     }
 
     enum Metric {
-        /// Slightly-cut corners rather than rounded: reads as equipment, not card.
-        static let radius: CGFloat = 4
-        static let gutter: CGFloat = 20
-        static let stack: CGFloat = 14
+        /// Soft. Paired with dropping the hairline border, this is most of what
+        /// separates the new look from the old one.
+        static let radius: CGFloat = 18
+        static let gutter: CGFloat = 22
+        /// Generous. Whitespace is doing the job the borders used to.
+        static let stack: CGFloat = 18
+        static let panelPadding: CGFloat = 20
     }
 }
 
@@ -82,21 +108,61 @@ struct ScreenBackground<Content: View>: View {
     }
 }
 
-/// Small uppercase tracked label that heads a section. Replaces SF Symbol
-/// `Label` rows, which were most of the generic feel.
+/// Small uppercase tracked label that heads a section.
 struct SectionLabel: View {
     let text: String
     init(_ text: String) { self.text = text }
     var body: some View {
         Text(text.uppercased())
             .font(Theme.Font.sectionLabel)
-            .tracking(1.6)
+            .tracking(1.3)
             .foregroundStyle(Theme.Palette.textDim)
     }
 }
 
-/// Squared surface with a hairline. The hairline is what makes it read as an
-/// instrument panel rather than a floating card.
+/// The readiness dial.
+///
+/// One number, stated once, at size. The ring is a thin track rather than a
+/// thick gauge — it should register as a quiet frame around the score, not
+/// compete with it.
+struct ReadinessRing: View {
+    let score: Int
+    var size: CGFloat = 190
+    var label: String = "Readiness"
+
+    private var fraction: Double { Double(min(max(score, 0), 100)) / 100 }
+    private var tint: Color { Theme.Palette.readiness(score) }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Theme.Palette.surfaceHigh, lineWidth: 6)
+            Circle()
+                .trim(from: 0, to: fraction)
+                .stroke(tint, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                // Start at the top rather than at 3 o'clock, which is where a
+                // trimmed circle begins by default.
+                .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 0.6), value: fraction)
+
+            VStack(spacing: 2) {
+                Text("\(score)")
+                    .font(Theme.Font.display(64))
+                    .foregroundStyle(Theme.Palette.text)
+                Text(label)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Palette.textDim)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label) \(score) out of 100")
+    }
+}
+
+/// A soft surface. No border by design — the fill and the surrounding space are
+/// enough, and the hairline was what made every screen read as an instrument
+/// panel.
 struct Panel<Content: View>: View {
     var accent: Color? = nil
     @ViewBuilder var content: () -> Content
@@ -104,18 +170,18 @@ struct Panel<Content: View>: View {
     var body: some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(Theme.Metric.gutter)
+            .padding(Theme.Metric.panelPadding)
             .background(Theme.Palette.surface)
-            .overlay(alignment: .leading) {
-                // Accent spine, used to mark the primary panel on a screen.
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius, style: .continuous))
+            .overlay(alignment: .topLeading) {
+                // The primary panel gets a soft tint wash instead of the old
+                // accent spine, which read as a warning stripe.
                 if let accent {
-                    Rectangle().fill(accent).frame(width: 3)
+                    RoundedRectangle(cornerRadius: Theme.Metric.radius, style: .continuous)
+                        .fill(accent.opacity(0.06))
+                        .allowsHitTesting(false)
                 }
             }
-            .overlay(
-                Rectangle().stroke(Theme.Palette.line, lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
     }
 }
 
@@ -130,9 +196,8 @@ struct StatRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(name.uppercased())
-                .font(Theme.Font.sectionLabel)
-                .tracking(1.2)
+            Text(name)
+                .font(Theme.Font.body)
                 .foregroundStyle(Theme.Palette.textDim)
             Spacer(minLength: 12)
             Text(value)
@@ -148,7 +213,7 @@ struct StatRow: View {
     }
 
     private func deltaText(_ d: Double) -> String {
-        let arrow = d < 0 ? "▼" : "▲"
+        let arrow = d < 0 ? "↓" : "↑"
         return "\(arrow)\(abs(d).formatted(.number.precision(.fractionLength(0))))%"
     }
 
@@ -167,19 +232,15 @@ struct ActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title.uppercased())
+            // Sentence case. Shouting a label in uppercase was a large part of
+            // what made every screen feel like a warning.
+            Text(title)
                 .font(Theme.Font.button)
-                .tracking(1.4)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 17)
+                .padding(.vertical, 16)
                 .foregroundStyle(filled ? Theme.Palette.bg : Theme.Palette.text)
-                .background(filled ? Theme.Palette.accent : Color.clear)
-                .overlay(
-                    Rectangle().stroke(
-                        filled ? Color.clear : Theme.Palette.line, lineWidth: 1
-                    )
-                )
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
+                .background(filled ? Theme.Palette.accent : Theme.Palette.surfaceHigh)
+                .clipShape(Capsule())
         }
         .buttonStyle(PressStyle())
     }

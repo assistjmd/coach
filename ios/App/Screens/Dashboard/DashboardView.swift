@@ -70,17 +70,14 @@ struct DashboardView: View {
 
     // MARK: Header
 
+    /// Just the date, quietly. A 40pt "TODAY" competed with the score for the
+    /// same job, and the score is the thing worth reading.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            SectionLabel(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide)))
-            Text("TODAY")
-                .font(.system(size: 40, weight: .black))
-                .tracking(-0.5)
-                .foregroundStyle(Theme.Palette.text)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 12)
-        .padding(.bottom, 6)
+        Text(Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide)))
+            .font(Theme.Font.body)
+            .foregroundStyle(Theme.Palette.textDim)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
     }
 
     // MARK: States
@@ -144,60 +141,76 @@ struct DashboardView: View {
     @ViewBuilder
     private func briefBody(_ b: TodayBrief) -> some View {
         if b.stale {
-            Panel(accent: Theme.Palette.caution) {
+            Panel {
                 Text("This is from \(b.day). I couldn't build a new one yet.")
                     .font(Theme.Font.caption)
-                    .foregroundStyle(Theme.Palette.textDim)
+                    .foregroundStyle(Theme.Palette.caution)
             }
         }
 
-        // Primary panel. The accent spine marks what to read first.
-        Panel(accent: Theme.Palette.accent) {
-            VStack(alignment: .leading, spacing: 10) {
-                SectionLabel("Where you are")
+        // The score, centred and alone. Everything below it is support.
+        if let score = b.readinessScore {
+            VStack(spacing: 20) {
+                ReadinessRing(score: score)
                 Text(b.readinessSummary)
-                    .font(.system(size: 19, weight: .medium))
-                    .lineSpacing(3)
+                    .font(Theme.Font.headline(20))
+                    .lineSpacing(5)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(Theme.Palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+            .offset(y: appeared ? 0 : 12)
+            .opacity(appeared ? 1 : 0)
+        } else {
+            // Older briefs predate the score. The prose still stands on its own.
+            Panel(accent: Theme.Palette.accent) {
+                Text(b.readinessSummary)
+                    .font(Theme.Font.headline(20))
+                    .lineSpacing(5)
                     .foregroundStyle(Theme.Palette.text)
             }
+            .offset(y: appeared ? 0 : 12)
+            .opacity(appeared ? 1 : 0)
         }
-        .offset(y: appeared ? 0 : 12)
-        .opacity(appeared ? 1 : 0)
 
-        Panel {
-            VStack(alignment: .leading, spacing: 14) {
-                SectionLabel("Today's session")
-                Text(b.trainingPrescription)
-                    .font(Theme.Font.bodyStrong)
-                    .lineSpacing(3)
-                    .foregroundStyle(Theme.Palette.text)
-
-                if !b.sessionItems.isEmpty {
-                    Rectangle().fill(Theme.Palette.line).frame(height: 1)
-                    Button { showingSession = true } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("\(ticked.count) of \(b.sessionItems.count) done")
-                                    .font(.system(size: 15, weight: .heavy))
-                                    .foregroundStyle(
-                                        ticked.count == b.sessionItems.count
-                                            ? Theme.Palette.accent : Theme.Palette.text
-                                    )
-                                Text("Tick items off and log what you actually did")
-                                    .font(Theme.Font.caption)
-                                    .foregroundStyle(Theme.Palette.textDim)
-                            }
-                            Spacer()
-                            Text("→")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundStyle(Theme.Palette.accent)
+        Button { if !b.sessionItems.isEmpty { showingSession = true } } label: {
+            Panel(accent: Theme.Palette.accent) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        SectionLabel("Today's session")
+                        Spacer()
+                        if !b.sessionItems.isEmpty {
+                            Text("\(ticked.count)/\(b.sessionItems.count)")
+                                .font(Theme.Font.stat(15))
+                                .foregroundStyle(
+                                    ticked.count == b.sessionItems.count
+                                        ? Theme.Palette.accent : Theme.Palette.textDim
+                                )
                         }
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(PressStyle())
+                    Text(b.trainingPrescription)
+                        .font(Theme.Font.headline(17))
+                        .lineSpacing(4)
+                        .multilineTextAlignment(.leading)
+                        .foregroundStyle(Theme.Palette.text)
+
+                    if !b.sessionItems.isEmpty {
+                        HStack(spacing: 6) {
+                            Text("Open the session")
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Palette.accent)
+                    }
                 }
             }
         }
+        .buttonStyle(PressStyle())
+        .disabled(b.sessionItems.isEmpty)
         .offset(y: appeared ? 0 : 16)
         .opacity(appeared ? 1 : 0)
 
@@ -207,6 +220,7 @@ struct DashboardView: View {
                     SectionLabel("Why")
                     Text(rationale)
                         .font(Theme.Font.body)
+                        .lineSpacing(3)
                         .foregroundStyle(Theme.Palette.textDim)
                 }
             }
@@ -238,6 +252,8 @@ struct TodayBrief: Decodable {
     let readinessSummary: String
     let trainingPrescription: String
     let rationale: String?
+    /// 0-100. Drives the ring the home screen leads with.
+    let readinessScore: Int?
     /// True when the server served an older brief rather than today's.
     let stale: Bool
     let sessionItems: [SessionItem]

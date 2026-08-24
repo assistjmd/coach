@@ -162,6 +162,74 @@ final class HealthKitManager: ObservableObject {
         }
     }
 
+    /// Gap that separates one sleep from the next.
+    ///
+    /// Apple Health stores a night as dozens of short stage samples — every REM
+    /// block, every deep block, every awakening is its own record. Grouping on
+    /// sample boundaries produced one "sleep session" per fragment, which is why
+    /// a night showed up segmented into thirty entries.
+    ///
+    /// 90 minutes is long enough to absorb a trip to the bathroom and short
+    /// enough that an afternoon nap stays a separate session.
+    private static let sleepGap: TimeInterval = 90 * 60
+
+    /// Cluster raw sleep samples into nights.
+    ///
+    /// Static and pure so it can be tested without a HealthKit store.
+    static func nights(from samples: [HKSample]) -> [HKSleepDTO] {
+        let staged = samples
+            .compactMap { $0 as? HKCategorySample }
+            .filter { sample in
+                // "In bed" overlaps the asleep samples and would double-count
+                // every night it appears alongside them.
+                HKCategoryValueSleepAnalysis(rawValue: sample.value) != .inBed
+            }
+            .sorted { $0.startDate < $1.startDate }
+
+        var out: [HKSleepDTO] = []
+        var current: HKSleepDTO?
+        var lastEnd: Date?
+
+        for s in staged {
+            let secs = Int(s.endDate.timeIntervalSince(s.startDate))
+            let stage = HKCategoryValueSleepAnalysis(rawValue: s.value)
+
+            if let end = lastEnd, s.startDate.timeIntervalSince(end) > sleepGap,
+               let finished = current {
+                out.append(finished)
+                current = nil
+            }
+
+            // Mutated through a local copy: Swift forbids overlapping access
+            // to an optional's members, and the read-modify-write below counts.
+            var night = current ?? HKSleepDTO(
+                source_record_id: s.uuid.uuidString,
+                started_at: s.startDate,
+                ended_at: s.endDate,
+                deep_s: nil, light_s: nil, rem_s: nil, awake_s: nil
+            )
+            night.ended_at = max(night.ended_at, s.endDate)
+
+            switch stage {
+            case .asleepDeep:   night.deep_s  = (night.deep_s  ?? 0) + secs
+            case .asleepCore:   night.light_s = (night.light_s ?? 0) + secs
+            case .asleepREM:    night.rem_s   = (night.rem_s   ?? 0) + secs
+            case .awake:        night.awake_s = (night.awake_s ?? 0) + secs
+            case .asleepUnspecified:
+                // Garmin, Whoop and older Apple Watch data write this rather
+                // than a stage. It was previously dropped, so a night from a
+                // non-Apple source recorded no sleep at all.
+                night.light_s = (night.light_s ?? 0) + secs
+            default: break
+            }
+            current = night
+            lastEnd = max(lastEnd ?? s.endDate, s.endDate)
+        }
+
+        if let finished = current { out.append(finished) }
+        return out
+    }
+
     // MARK: - delta fetching
 
     private func fetchDeltas() async throws -> HealthKitBatch {
@@ -197,26 +265,7 @@ final class HealthKitManager: ObservableObject {
         // Sleep
         if let sleepType = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) {
             let (sleeps, newAnchor) = try await fetchAnchored(type: sleepType, anchor: anchors["sleep"])
-            var grouped: [String: HKSleepDTO] = [:]
-            for s in sleeps.compactMap({ $0 as? HKCategorySample }) {
-                let key = "\(s.startDate.timeIntervalSince1970)-\(s.endDate.timeIntervalSince1970)"
-                var dto = grouped[key] ?? HKSleepDTO(
-                    source_record_id: s.uuid.uuidString,
-                    started_at: s.startDate,
-                    ended_at: s.endDate,
-                    deep_s: nil, light_s: nil, rem_s: nil, awake_s: nil
-                )
-                let secs = Int(s.endDate.timeIntervalSince(s.startDate))
-                switch HKCategoryValueSleepAnalysis(rawValue: s.value) {
-                case .asleepDeep:   dto.deep_s  = (dto.deep_s  ?? 0) + secs
-                case .asleepCore:   dto.light_s = (dto.light_s ?? 0) + secs
-                case .asleepREM:    dto.rem_s   = (dto.rem_s   ?? 0) + secs
-                case .awake:        dto.awake_s = (dto.awake_s ?? 0) + secs
-                default: break
-                }
-                grouped[key] = dto
-            }
-            batch.sleep.append(contentsOf: grouped.values)
+            batch.sleep.append(contentsOf: Self.nights(from: sleeps))
             anchors["sleep"] = newAnchor
         }
 
@@ -492,7 +541,9 @@ struct HKWorkoutDTO: Encodable {
 struct HKSleepDTO: Encodable {
     let source_record_id: String
     let started_at: Date
-    let ended_at: Date
+    // Extended as later stage samples of the same night arrive, so a night ends
+    // when the athlete woke rather than when its first fragment finished.
+    var ended_at: Date
     var deep_s: Int?
     var light_s: Int?
     var rem_s: Int?

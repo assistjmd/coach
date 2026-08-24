@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from app.analytics.dedupe import better, find_duplicate
 from app.crypto import encrypt
 from app.db import SessionLocal
 from app.models import (
@@ -135,6 +136,35 @@ def _sync_one_inner(token_id) -> int:
 def _apply(db: Session, user_id, source: str, rec: NormalizedRecord) -> None:
     p = rec.payload
     if rec.kind == "workout":
+        # The same session reaches us from several sources with a different id
+        # each time, so the per-source unique constraint does not catch it. Five
+        # copies of one lift meant five times the training load.
+        existing = find_duplicate(db, user_id, p["started_at"], p["ended_at"])
+        if existing is not None:
+            if existing.source == source and existing.source_record_id == rec.source_record_id:
+                return  # Same row we already hold; the constraint would no-op anyway.
+            candidate = Workout(
+                source=source,
+                sport=p.get("sport"),
+                avg_hr=p.get("avg_hr"),
+                max_hr=p.get("max_hr"),
+                distance_m=p.get("distance_m"),
+            )
+            if better(candidate, existing):
+                # Overwrite in place rather than delete-and-insert: the row id is
+                # what any journal or compliance record points at.
+                existing.source = source
+                existing.source_record_id = rec.source_record_id
+                existing.sport = p.get("sport") or existing.sport
+                existing.started_at = p["started_at"]
+                existing.ended_at = p["ended_at"]
+                existing.duration_s = _duration_s(p)
+                existing.distance_m = p.get("distance_m") or existing.distance_m
+                existing.avg_hr = p.get("avg_hr") or existing.avg_hr
+                existing.max_hr = p.get("max_hr") or existing.max_hr
+                existing.raw = p.get("raw") or existing.raw
+            return
+
         stmt = pg_insert(Workout).values(
             user_id=user_id,
             source=source,
