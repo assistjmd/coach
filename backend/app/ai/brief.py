@@ -109,7 +109,7 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
     )
     planned = parsed.get("session_planned")
     brief.session_planned = planned if isinstance(planned, bool) else None
-    brief.session_items = _clean_items(parsed.get("session_items"))
+    brief.session_items = clean_items(parsed.get("session_items"))
     brief.model = cfg.anthropic_model_default
     db.commit()
     db.refresh(brief)
@@ -119,8 +119,11 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
 _MAX_SESSION_ITEMS = 8
 
 
-def _clean_items(raw: object) -> list[dict[str, str]] | None:
+def clean_items(raw: object) -> list[dict[str, str]] | None:
     """Validate the model's checkbox items before they reach the database.
+
+    Shared with `ai/adjust.py`: a revised session has to satisfy exactly the
+    same rules as a fresh one, and two validators would drift.
 
     Ids become the key the athlete's ticks are stored against, so a duplicate or
     missing id would make two checkboxes share one tick. Anything malformed is

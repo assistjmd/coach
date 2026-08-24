@@ -99,13 +99,19 @@ def _recent_sessions(db: Session, user: User, days: int = 10) -> list[dict]:
             if isinstance(actual, dict) and actual:
                 entry["actually_did"] = actual
             items.append(entry)
-        out.append({
+        entry = {
             "day": b.day.isoformat(),
             "prescribed": b.training_prescription,
             "was_training_day": b.session_planned,
             "items": items,
             "athlete_notes": (log.journal if log else None),
-        })
+        }
+        if b.adjustment_note:
+            # What they asked to change, in their words. "No barbell today" is
+            # the single most useful thing to know when programming tomorrow —
+            # without it the coach keeps prescribing equipment they do not have.
+            entry["athlete_changed_this"] = b.adjustment_note
+        out.append(entry)
     return out
 
 

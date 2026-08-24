@@ -185,6 +185,75 @@ struct Panel<Content: View>: View {
     }
 }
 
+/// How closely the athlete is following the plan.
+///
+/// The differentiated number. Every wearable reports readiness because every
+/// wearable measures a body; none of them prescribe anything, so none of them
+/// can say whether you did it.
+///
+/// Copy states the fact and stops. "You've done 8 of 10" is information;
+/// "Great job!" is the pep sign-off the coach's own voice rules already ban.
+struct ConsistencyCard: View {
+    let score: Int?
+    let streak: Int
+    let assessed: Int
+
+    var body: some View {
+        Panel {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    SectionLabel("Consistency")
+                    if let score {
+                        Text("\(score)%")
+                            .font(Theme.Font.stat(30))
+                            .foregroundStyle(tint(score))
+                        Text(detail)
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Palette.textDim)
+                    } else {
+                        // Never render 0% for a new account — it reads as a
+                        // judgement on someone who has not been asked to do
+                        // anything yet.
+                        Text("Not yet")
+                            .font(Theme.Font.stat(22))
+                            .foregroundStyle(Theme.Palette.textDim)
+                        Text("A few more days and I'll show how closely you're following the plan.")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Palette.textDim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
+                if streak > 2 {
+                    VStack(spacing: 2) {
+                        Text("\(streak)")
+                            .font(Theme.Font.stat(22))
+                            .foregroundStyle(Theme.Palette.text)
+                        Text("day run")
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Palette.textDim)
+                    }
+                }
+            }
+        }
+    }
+
+    private var detail: String {
+        // Sessions, not days: rest days are excluded from the score, and saying
+        // "of the last 14 days" would not match the number shown.
+        assessed == 1
+            ? "of 1 session I asked for"
+            : "of the last \(assessed) sessions I asked for"
+    }
+
+    private func tint(_ score: Int) -> Color {
+        switch score {
+        case ..<50: return Theme.Palette.caution
+        default: return Theme.Palette.text
+        }
+    }
+}
+
 /// One metric: name, value, optional delta against baseline.
 struct StatRow: View {
     let name: String

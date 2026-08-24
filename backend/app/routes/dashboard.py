@@ -6,10 +6,21 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.ai.brief import generate_daily_brief
+from app.ai.adjust import NoSessionToday, adjust_session
+from app.analytics.consistency import consistency
 from app.auth.deps import current_user
 from app.dates import today_for
 from app.db import get_db
-from app.models import DailyBrief, DayLog, HRVReading, SleepSession, User, Workout
+from app.quota import enforce
+from app.models import (
+    ChatMessage,
+    DailyBrief,
+    DayLog,
+    HRVReading,
+    SleepSession,
+    User,
+    Workout,
+)
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +52,17 @@ class TodayBrief(BaseModel):
     # stored from the first brief onward but never sent to the client, so the
     # app had prose about readiness and no way to show the score behind it.
     readiness_score: int | None = None
+    # Share of prescribed sessions actually done over the last 14 days. None
+    # until there are enough scored days for a percentage to mean anything.
+    consistency: int | None = None
+    consistency_streak: int = 0
+    # The denominator, so the client can say "8 of 10" rather than only a
+    # percentage floating free of any context.
+    consistency_assessed: int = 0
+    # True when the athlete talked Will into changing today's session. Shown so
+    # the plan visibly reflects their own edit rather than looking like the
+    # coach's original call.
+    adjusted: bool = False
     stale: bool = False
     # Today's session as tickable pieces, and which are already done. Carried
     # here as well as on the calendar because ticking off a session as you do it
@@ -64,7 +86,7 @@ def today(user: User = Depends(current_user), db: Session = Depends(get_db)) -> 
     )
     if brief is not None and brief.day == today_:
         completed, actuals = _log_state(db, user, brief.day)
-        return _as_response(brief, completed=completed, actuals=actuals)
+        return _as_response(db, user, brief, completed=completed, actuals=actuals)
 
     # Nothing for today. The nightly job runs at a fixed hour, so a user who
     # signs up after it has already run would otherwise stare at "no brief yet"
@@ -73,7 +95,7 @@ def today(user: User = Depends(current_user), db: Session = Depends(get_db)) -> 
         try:
             fresh = generate_daily_brief(db, user, day=today_)
             completed, actuals = _log_state(db, user, fresh.day)
-            return _as_response(fresh, completed=completed, actuals=actuals)
+            return _as_response(db, user, fresh, completed=completed, actuals=actuals)
         except Exception:
             log.exception("on-demand brief generation failed for user %s", user.id)
 
@@ -86,10 +108,65 @@ def today(user: User = Depends(current_user), db: Session = Depends(get_db)) -> 
     # is from rather than presenting yesterday's numbers as today's.
     completed, actuals = _log_state(db, user, brief.day)
     return _as_response(
+        db,
+        user,
         brief,
         stale=today_ - brief.day > _MAX_BRIEF_AGE,
         completed=completed,
         actuals=actuals,
+    )
+
+
+class AdjustBody(BaseModel):
+    message: str
+
+
+class AdjustResponse(BaseModel):
+    # What Will says back. Shown above the revised session.
+    reply: str
+    # False when Will answered a question or declined, so the client can render
+    # the response without implying the session moved.
+    changed: bool
+    brief: TodayBrief
+
+
+@router.post("/today/adjust", response_model=AdjustResponse)
+def adjust_today(
+    body: AdjustBody,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> AdjustResponse:
+    """Let the athlete talk Will into changing today's session.
+
+    Metered against the same allowance as chat. This runs on the brief model
+    rather than the cheap one, so leaving it unmetered would make it the
+    cheapest way for a single user to run up the bill.
+    """
+    message = body.message.strip()
+    if not message:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "say what you want to change")
+    enforce(db, user)
+
+    # Recorded as a chat message so it counts against the allowance and shows up
+    # in the athlete's export alongside everything else they said to Will.
+    db.add(ChatMessage(user_id=user.id, role="user", content=message))
+    db.commit()
+
+    try:
+        result = adjust_session(db, user, message)
+    except NoSessionToday:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "no session today to change"
+        ) from None
+
+    db.add(ChatMessage(user_id=user.id, role="assistant", content=result.reply))
+    db.commit()
+
+    completed, actuals = _log_state(db, user, result.brief.day)
+    return AdjustResponse(
+        reply=result.reply,
+        changed=result.changed,
+        brief=_as_response(db, user, result.brief, completed=completed, actuals=actuals),
     )
 
 
@@ -102,11 +179,18 @@ def _has_data(db: Session, user: User) -> bool:
 
 
 def _as_response(
+    db: Session,
+    user: User,
     brief: DailyBrief,
     stale: bool = False,
     completed: list[str] | None = None,
     actuals: dict[str, ItemActual] | None = None,
 ) -> TodayBrief:
+    # Recomputed on every read rather than stored: a workout can arrive late from
+    # a provider backfill, and a day that scored as missed at write time may not
+    # be one now.
+    streak = consistency(db, user)
+
     return TodayBrief(
         day=brief.day,
         readiness_summary=brief.readiness_summary,
@@ -114,6 +198,10 @@ def _as_response(
         rationale=brief.rationale,
         flags=brief.flags,
         readiness_score=brief.readiness_score,
+        consistency=streak.score,
+        consistency_streak=streak.streak,
+        consistency_assessed=streak.assessed,
+        adjusted=brief.adjusted_at is not None,
         stale=stale,
         session_items=[
             SessionItem(

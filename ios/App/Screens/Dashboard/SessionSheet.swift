@@ -8,11 +8,15 @@ import SwiftUI
 /// six instead of three of eight" is the thing a coach needs to see next week.
 struct SessionSheet: View {
     let day: String
+    let prescription: String
     let items: [SessionItem]
     /// Seed state. The sheet owns its edits and reports the final state back.
     let initialCompleted: [String]
     let initialActuals: [String: ItemActual]
     let onSaved: ([String], [String: ItemActual]) -> Void
+    /// Called when Will revises the session, so every surface showing today
+    /// updates together rather than drifting apart.
+    let onAdjusted: (TodayBrief) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var ticked: Set<String> = []
@@ -20,6 +24,7 @@ struct SessionSheet: View {
     @State private var saving = false
     @State private var error: String?
     @State private var loaded = false
+    @State private var adjusting = false
 
     var body: some View {
         NavigationStack {
@@ -46,6 +51,12 @@ struct SessionSheet: View {
                         }
                         .disabled(saving)
                         .padding(.top, 4)
+
+                        // Second, and quieter. Changing the session is the
+                        // exception; ticking it off is the common path.
+                        ActionButton(title: "Change this session", filled: false) {
+                            adjusting = true
+                        }
                     }
                     .padding(.horizontal, Theme.Metric.gutter)
                     .padding(.bottom, 40)
@@ -60,6 +71,17 @@ struct SessionSheet: View {
             .toolbarBackground(Theme.Palette.bg, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
+        .sheet(isPresented: $adjusting) {
+            AdjustSheet(
+                prescription: prescription,
+                items: items
+            ) { updated in
+                onAdjusted(updated)
+                // The revised session replaces what this sheet is showing, so
+                // close rather than leave a stale list behind it.
+                dismiss()
+            }
+        }
         .task {
             guard !loaded else { return }
             loaded = true

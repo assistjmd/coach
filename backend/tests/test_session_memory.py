@@ -8,7 +8,7 @@ a heart rate, with no record of which lifts were done.
 
 from datetime import date, timedelta
 
-from app.ai.brief import _MAX_SESSION_ITEMS, _clean_items
+from app.ai.brief import _MAX_SESSION_ITEMS, clean_items
 from app.ai.data import gather_recent
 from app.models import DailyBrief, DayLog, User
 
@@ -89,12 +89,12 @@ def test_a_lifting_session_is_not_truncated_to_five_items():
         {"id": f"item{i}", "text": f"Exercise {i}, 3x8", "sets": 3, "reps": 8}
         for i in range(_MAX_SESSION_ITEMS)
     ]
-    assert len(_clean_items(raw)) == _MAX_SESSION_ITEMS == 8
+    assert len(clean_items(raw)) == _MAX_SESSION_ITEMS == 8
 
 
 def test_items_beyond_the_cap_are_still_dropped():
     raw = [{"id": f"i{i}", "text": f"Exercise {i}"} for i in range(20)]
-    assert len(_clean_items(raw)) == _MAX_SESSION_ITEMS
+    assert len(clean_items(raw)) == _MAX_SESSION_ITEMS
 
 
 def test_no_sessions_yet_is_an_empty_list_not_an_error(db, user):

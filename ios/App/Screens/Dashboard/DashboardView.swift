@@ -47,12 +47,17 @@ struct DashboardView: View {
             if let b = brief {
                 SessionSheet(
                     day: b.day,
+                    prescription: b.trainingPrescription,
                     items: b.sessionItems,
                     initialCompleted: Array(ticked),
                     initialActuals: actuals
                 ) { completed, logged in
                     ticked = Set(completed)
                     actuals = logged
+                } onAdjusted: { updated in
+                    brief = updated
+                    ticked = Set(updated.completedItems)
+                    actuals = updated.itemActuals
                 }
             }
         }
@@ -176,11 +181,24 @@ struct DashboardView: View {
             .opacity(appeared ? 1 : 0)
         }
 
+        ConsistencyCard(
+            score: b.consistency,
+            streak: b.consistencyStreak ?? 0,
+            assessed: b.consistencyAssessed ?? 0
+        )
+        .offset(y: appeared ? 0 : 14)
+        .opacity(appeared ? 1 : 0)
+
         Button { if !b.sessionItems.isEmpty { showingSession = true } } label: {
             Panel(accent: Theme.Palette.accent) {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack {
+                    HStack(spacing: 8) {
                         SectionLabel("Today's session")
+                        if b.adjusted == true {
+                            Text("Adjusted")
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Palette.accent)
+                        }
                         Spacer()
                         if !b.sessionItems.isEmpty {
                             Text("\(ticked.count)/\(b.sessionItems.count)")
@@ -254,6 +272,13 @@ struct TodayBrief: Decodable {
     let rationale: String?
     /// 0-100. Drives the ring the home screen leads with.
     let readinessScore: Int?
+    /// Share of prescribed sessions actually done. Nil until there are enough
+    /// scored days for a percentage to mean anything.
+    let consistency: Int?
+    let consistencyStreak: Int?
+    let consistencyAssessed: Int?
+    /// True when the athlete talked Will into changing today's session.
+    let adjusted: Bool?
     /// True when the server served an older brief rather than today's.
     let stale: Bool
     let sessionItems: [SessionItem]

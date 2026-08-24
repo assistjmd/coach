@@ -54,5 +54,13 @@ class DailyBrief(Base):
     # The athlete's correction. Always wins when set — inference is a guess, and
     # being told you skipped a session you did is the worst failure here.
     compliance_override: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Set when the athlete talked Will into changing the session. Kept with the
+    # request in their own words, because `_recent_sessions` feeds the last ten
+    # days back into tomorrow's brief and "they asked to swap barbell work for
+    # dumbbells" is exactly the context that should shape what comes next.
+    adjusted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    adjustment_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
