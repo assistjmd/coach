@@ -20,6 +20,9 @@ from app.models import (
 
 router = APIRouter(prefix="/v1/ingest", tags=["ingest"])
 
+# Generous against the client's 400-record chunks, tight against an attacker.
+_MAX_BATCH = 2000
+
 
 class HKWorkout(BaseModel):
     source_record_id: str
@@ -72,11 +75,14 @@ class HKBodyMetric(BaseModel):
 
 
 class HealthKitBatch(BaseModel):
-    workouts: list[HKWorkout] = Field(default_factory=list)
-    sleep: list[HKSleep] = Field(default_factory=list)
-    hrv: list[HKHRV] = Field(default_factory=list)
-    heart_rate: list[HKHeartRate] = Field(default_factory=list)
-    body_metrics: list[HKBodyMetric] = Field(default_factory=list)
+    # Bounded per batch. The client already chunks at 400 records, so these
+    # ceilings only bite on a malformed or hostile caller — for whom an
+    # unbounded list is a cheap way to exhaust memory and fill the database.
+    workouts: list[HKWorkout] = Field(default_factory=list, max_length=_MAX_BATCH)
+    sleep: list[HKSleep] = Field(default_factory=list, max_length=_MAX_BATCH)
+    hrv: list[HKHRV] = Field(default_factory=list, max_length=_MAX_BATCH)
+    heart_rate: list[HKHeartRate] = Field(default_factory=list, max_length=_MAX_BATCH)
+    body_metrics: list[HKBodyMetric] = Field(default_factory=list, max_length=_MAX_BATCH)
 
 
 class IngestSummary(BaseModel):

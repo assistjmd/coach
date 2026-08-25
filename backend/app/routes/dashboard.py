@@ -2,7 +2,7 @@ import logging
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.ai.brief import generate_daily_brief
@@ -118,7 +118,9 @@ def today(user: User = Depends(current_user), db: Session = Depends(get_db)) -> 
 
 
 class AdjustBody(BaseModel):
-    message: str
+    # Same reasoning as chat, and it matters more here: this runs on the
+    # expensive model.
+    message: str = Field(min_length=1, max_length=1000)
 
 
 class AdjustResponse(BaseModel):

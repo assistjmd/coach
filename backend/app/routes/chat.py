@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,10 @@ router = APIRouter(prefix="/v1/chat", tags=["chat"])
 
 
 class ChatBody(BaseModel):
-    message: str
+    # Bounded because the daily count is not the only cost that matters: 25
+    # unbounded messages can be 25 megabytes of input tokens. Two thousand
+    # characters is far more than anyone types at a coach.
+    message: str = Field(min_length=1, max_length=2000)
 
 
 class QuotaResponse(BaseModel):
