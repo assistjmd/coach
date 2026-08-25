@@ -12,6 +12,8 @@ struct DashboardView: View {
     @State private var ticked: Set<String> = []
     @State private var actuals: [String: ItemActual] = [:]
     @State private var showingSession = false
+    @State private var showingReadiness = false
+    @State private var showingConsistency = false
 
     enum LoadState: Equatable {
         case loading
@@ -61,6 +63,8 @@ struct DashboardView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingReadiness) { ReadinessTrendSheet() }
+        .sheet(isPresented: $showingConsistency) { ConsistencyDetailSheet() }
         .task {
             // Deliberately does not request HealthKit authorization. Onboarding
             // owns the first prompt — the system sheet is one-shot, so firing it
@@ -155,16 +159,23 @@ struct DashboardView: View {
 
         // The score, centred and alone. Everything below it is support.
         if let score = b.readinessScore {
-            VStack(spacing: 20) {
-                ReadinessRing(score: score)
-                Text(b.readinessSummary)
-                    .font(Theme.Font.headline(20))
-                    .lineSpacing(5)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(Theme.Palette.text)
-                    .fixedSize(horizontal: false, vertical: true)
+            Button { showingReadiness = true } label: {
+                VStack(spacing: 18) {
+                    ReadinessRing(score: score)
+                    // First sentence only. The full read is a tap away — on the
+                    // screen you glance at before you are properly awake, three
+                    // lines of prose under the number is three lines nobody
+                    // finishes.
+                    Text(Self.headline(b.readinessSummary))
+                        .font(Theme.Font.headline(20))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Theme.Palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity)
+            .buttonStyle(PressStyle())
             .padding(.top, 12)
             .padding(.bottom, 8)
             .offset(y: appeared ? 0 : 12)
@@ -172,20 +183,22 @@ struct DashboardView: View {
         } else {
             // Older briefs predate the score. The prose still stands on its own.
             Panel(accent: Theme.Palette.accent) {
-                Text(b.readinessSummary)
+                Text(Self.headline(b.readinessSummary))
                     .font(Theme.Font.headline(20))
-                    .lineSpacing(5)
                     .foregroundStyle(Theme.Palette.text)
             }
             .offset(y: appeared ? 0 : 12)
             .opacity(appeared ? 1 : 0)
         }
 
-        ConsistencyCard(
-            score: b.consistency,
-            streak: b.consistencyStreak ?? 0,
-            assessed: b.consistencyAssessed ?? 0
-        )
+        Button { showingConsistency = true } label: {
+            ConsistencyCard(
+                score: b.consistency,
+                streak: b.consistencyStreak ?? 0,
+                assessed: b.consistencyAssessed ?? 0
+            )
+        }
+        .buttonStyle(PressStyle())
         .offset(y: appeared ? 0 : 14)
         .opacity(appeared ? 1 : 0)
 
@@ -209,20 +222,21 @@ struct DashboardView: View {
                                 )
                         }
                     }
-                    Text(b.trainingPrescription)
-                        .font(Theme.Font.headline(17))
-                        .lineSpacing(4)
+                    Text(Self.headline(b.trainingPrescription))
+                        .font(Theme.Font.headline(19))
                         .multilineTextAlignment(.leading)
                         .foregroundStyle(Theme.Palette.text)
 
                     if !b.sessionItems.isEmpty {
-                        HStack(spacing: 6) {
+                        // The primary action on the screen, sized like it.
+                        HStack(spacing: 8) {
                             Text("Open the session")
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: 17, weight: .semibold))
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 14, weight: .semibold))
                         }
-                        .font(Theme.Font.caption)
                         .foregroundStyle(Theme.Palette.accent)
+                        .padding(.top, 4)
                     }
                 }
             }
@@ -232,19 +246,28 @@ struct DashboardView: View {
         .offset(y: appeared ? 0 : 16)
         .opacity(appeared ? 1 : 0)
 
-        if let rationale = b.rationale, !rationale.isEmpty {
-            Panel {
-                VStack(alignment: .leading, spacing: 8) {
-                    SectionLabel("Why")
-                    Text(rationale)
-                        .font(Theme.Font.body)
-                        .lineSpacing(3)
-                        .foregroundStyle(Theme.Palette.textDim)
-                }
-            }
-            .offset(y: appeared ? 0 : 20)
-            .opacity(appeared ? 1 : 0)
+    }
+
+    /// The first sentence of a paragraph.
+    ///
+    /// Today is a glance screen. The coach writes two or three sentences and all
+    /// of them are worth reading, but not at 7am with one eye open — the rest is
+    /// behind the readiness tap and the session sheet.
+    static func headline(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let end = trimmed.firstIndex(where: { ".!?".contains($0) }) else {
+            return trimmed
         }
+        let first = String(trimmed[...end])
+        // A very short opener ("Recovered.") is a lead-in, not the whole point,
+        // so keep the sentence after it too.
+        guard first.count < 24 else { return first }
+        let rest = trimmed[trimmed.index(after: end)...]
+            .trimmingCharacters(in: .whitespaces)
+        guard let secondEnd = rest.firstIndex(where: { ".!?".contains($0) }) else {
+            return first
+        }
+        return first + " " + String(rest[...secondEnd])
     }
 
     // MARK: Load

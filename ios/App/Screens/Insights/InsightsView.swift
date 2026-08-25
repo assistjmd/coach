@@ -46,6 +46,13 @@ struct DayEntry: Decodable, Identifiable {
 
     var id: String { day }
     var estimated: Bool { loadMethod != "trimp" }
+
+    /// "Mon 24 Aug", for the trend sheets. Static so it can be used on a bare
+    /// day string without building an entry.
+    static func shortLabel(_ day: String) -> String {
+        guard let d = parser.date(from: day) else { return day }
+        return d.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+    }
     var date: Date? { DayEntry.parser.date(from: day) }
 
     /// Parsed in the device's zone, deliberately.

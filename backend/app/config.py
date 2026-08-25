@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # keeps the better one, since it is the output that actually matters and it
     # is generated once.
     chat_daily_message_limit: int = 25
+    # Separate from chat. Deliberately small: this runs on the expensive model,
+    # and a seventh revision in one day is arguing, not training.
+    adjust_daily_limit: int = 6
     chat_max_output_tokens: int = 700
 
     oura_client_id: str = ""

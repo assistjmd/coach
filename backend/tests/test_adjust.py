@@ -175,7 +175,26 @@ def test_adjustments_reach_tomorrows_brief(db, user, brief, monkeypatch):
     assert sessions[0]["athlete_changed_this"] == "no barbell today"
 
 
-def test_endpoint_is_metered_with_chat(client, auth, db, user, brief, monkeypatch):
+def test_chat_questions_do_not_use_up_adjustments(client, auth, db, user, brief, monkeypatch):
+    """The failure mode that made these separate: spending the day asking
+    questions must not leave you unable to change your workout, which is the
+    more valuable of the two."""
+    from app.config import settings
+
+    _stub(monkeypatch, {"reply": "ok", "changed": False,
+                        "training_prescription": brief.training_prescription,
+                        "session_items": brief.session_items})
+
+    for _ in range(settings().chat_daily_message_limit + 5):
+        db.add(ChatMessage(user_id=user.id, role="user", content="x", kind="chat"))
+    db.commit()
+
+    resp = client.post("/v1/dashboard/today/adjust", headers=auth,
+                       json={"message": "make it easier"})
+    assert resp.status_code == 200
+
+
+def test_adjustments_are_metered_on_their_own_allowance(client, auth, db, user, brief, monkeypatch):
     """This runs on the expensive model. Unmetered it would be the cheapest way
     to run up the bill."""
     from app.config import settings
@@ -184,8 +203,8 @@ def test_endpoint_is_metered_with_chat(client, auth, db, user, brief, monkeypatc
                         "training_prescription": brief.training_prescription,
                         "session_items": brief.session_items})
 
-    for _ in range(settings().chat_daily_message_limit):
-        db.add(ChatMessage(user_id=user.id, role="user", content="x"))
+    for _ in range(settings().adjust_daily_limit):
+        db.add(ChatMessage(user_id=user.id, role="user", content="x", kind="adjust"))
     db.commit()
 
     resp = client.post("/v1/dashboard/today/adjust", headers=auth,
@@ -193,6 +212,65 @@ def test_endpoint_is_metered_with_chat(client, auth, db, user, brief, monkeypatc
     assert resp.status_code == 429
 
 
+def test_adjustments_do_not_use_up_chat_questions(client, auth, db, user, monkeypatch):
+    from app.config import settings
+
+    for _ in range(settings().adjust_daily_limit + 3):
+        db.add(ChatMessage(user_id=user.id, role="user", content="x", kind="adjust"))
+    db.commit()
+
+    body = client.get("/v1/chat/quota", headers=auth).json()
+    assert body["remaining"] == settings().chat_daily_message_limit
+    assert body["adjust_remaining"] == 0
+
+
+def test_adjustments_stay_out_of_the_chat_transcript(db, user, brief, monkeypatch):
+    """Same table for metering and export, different conversation. Replaying an
+    adjustment in chat would have the coach answering a question about a workout
+    from two days ago."""
+    _stub(monkeypatch, {"reply": "Dumbbells it is.", "changed": False,
+                        "training_prescription": brief.training_prescription,
+                        "session_items": brief.session_items})
+    adjust_session(db, user, "no barbell")
+    db.add(ChatMessage(user_id=user.id, role="user", content="how's my week?", kind="adjust"))
+    db.commit()
+
+    rows = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.user_id == user.id, ChatMessage.kind == "chat")
+        .all()
+    )
+    assert rows == []
+
+
 def test_an_empty_message_is_rejected(client, auth, brief):
     resp = client.post("/v1/dashboard/today/adjust", headers=auth, json={"message": "   "})
     assert resp.status_code == 400
+
+
+def test_the_headline_helper_matches_the_apps_rules():
+    """Mirror of DashboardView.headline, kept here because the rule it encodes —
+    a short opener is a lead-in, not the whole point — is easy to break and has
+    no Swift test target to guard it."""
+    def headline(text: str) -> str:
+        t = text.strip()
+        idx = next((i for i, c in enumerate(t) if c in ".!?"), None)
+        if idx is None:
+            return t
+        first = t[: idx + 1]
+        if len(first) >= 24:
+            return first
+        rest = t[idx + 1 :].strip()
+        second = next((i for i, c in enumerate(rest) if c in ".!?"), None)
+        return first if second is None else first + " " + rest[: second + 1]
+
+    # A short opener keeps the sentence that follows it.
+    assert headline("Recovered. Train hard today. Sleep was good.") == (
+        "Recovered. Train hard today."
+    )
+    # A full opening sentence stands alone.
+    assert headline(
+        "Second short night in a row and your HRV took a 12% hit. Readiness is 61."
+    ) == "Second short night in a row and your HRV took a 12% hit."
+    # No terminator at all is returned whole rather than truncated.
+    assert headline("Easy day") == "Easy day"

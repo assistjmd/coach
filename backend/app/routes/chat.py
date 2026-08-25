@@ -10,7 +10,7 @@ from app.ai.chat import stream_chat
 from app.auth.deps import current_user
 from app.config import settings
 from app.db import SessionLocal, get_db
-from app.quota import enforce, used_recently
+from app.quota import enforce, limit_for, used_recently
 from app.models import ChatMessage, User
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
@@ -24,20 +24,33 @@ class QuotaResponse(BaseModel):
     used: int
     limit: int
     remaining: int
+    # Session adjustment draws on its own, smaller allowance.
+    adjust_used: int = 0
+    adjust_limit: int = 0
+    adjust_remaining: int = 0
 
 
 @router.get("/quota", response_model=QuotaResponse)
 def quota(user: User = Depends(current_user), db: Session = Depends(get_db)) -> QuotaResponse:
     """Lets the client show what's left before the user walks into the wall."""
-    limit = settings().chat_daily_message_limit
-    used = used_recently(db, user)
-    return QuotaResponse(used=used, limit=limit, remaining=max(0, limit - used))
+    limit = limit_for("chat")
+    used = used_recently(db, user, "chat")
+    adjust_limit = limit_for("adjust")
+    adjust_used = used_recently(db, user, "adjust")
+    return QuotaResponse(
+        used=used,
+        limit=limit,
+        remaining=max(0, limit - used),
+        adjust_used=adjust_used,
+        adjust_limit=adjust_limit,
+        adjust_remaining=max(0, adjust_limit - adjust_used),
+    )
 
 
 @router.post("")
 def chat(body: ChatBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    # Shared with session adjustment — see app/quota.py.
-    enforce(db, user)
+    # Session adjustment has its own allowance — see app/quota.py.
+    enforce(db, user, kind="chat")
 
     db.add(ChatMessage(user_id=user.id, role="user", content=body.message))
     db.commit()

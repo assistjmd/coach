@@ -16,6 +16,11 @@ class ChatMessage(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     role: Mapped[str] = mapped_column(String(16))  # user | assistant
+    # Which surface spent the tokens: "chat" for the Coach tab, "adjust" for
+    # changing today's session. They draw on separate allowances — sharing one
+    # meant a user who spent the day asking questions could no longer fix their
+    # workout, which is the more valuable of the two.
+    kind: Mapped[str] = mapped_column(String(16), default="chat", server_default="chat")
     content: Mapped[str] = mapped_column(Text)
     tool_calls: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

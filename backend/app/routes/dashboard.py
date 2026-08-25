@@ -145,11 +145,11 @@ def adjust_today(
     message = body.message.strip()
     if not message:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "say what you want to change")
-    enforce(db, user)
+    enforce(db, user, kind="adjust")
 
     # Recorded as a chat message so it counts against the allowance and shows up
     # in the athlete's export alongside everything else they said to Will.
-    db.add(ChatMessage(user_id=user.id, role="user", content=message))
+    db.add(ChatMessage(user_id=user.id, role="user", content=message, kind="adjust"))
     db.commit()
 
     try:
@@ -159,7 +159,7 @@ def adjust_today(
             status.HTTP_404_NOT_FOUND, "no session today to change"
         ) from None
 
-    db.add(ChatMessage(user_id=user.id, role="assistant", content=result.reply))
+    db.add(ChatMessage(user_id=user.id, role="assistant", content=result.reply, kind="adjust"))
     db.commit()
 
     completed, actuals = _log_state(db, user, result.brief.day)

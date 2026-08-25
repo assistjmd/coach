@@ -27,7 +27,11 @@ def stream_chat(db: Session, user: User, message: str) -> Iterator[str]:
 
     history = (
         db.query(ChatMessage)
-        .filter(ChatMessage.user_id == user.id)
+        # Chat only. Session adjustments are stored in the same table so they
+        # can be metered and exported, but they are a different conversation —
+        # replaying them here would have the coach answering questions the
+        # athlete asked about a workout two days ago.
+        .filter(ChatMessage.user_id == user.id, ChatMessage.kind == "chat")
         .order_by(ChatMessage.created_at.desc())
         .limit(20)
         .all()
