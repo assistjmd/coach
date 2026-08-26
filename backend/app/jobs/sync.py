@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.analytics.dedupe import better, find_duplicate
+from app.analytics.dedupe import better, find_duplicate, record_contributor
 from app.crypto import encrypt
 from app.db import SessionLocal
 from app.models import (
@@ -152,6 +152,8 @@ def _apply(db: Session, user_id, source: str, rec: NormalizedRecord) -> None:
                 max_hr=p.get("max_hr"),
                 distance_m=p.get("distance_m"),
             )
+            # Whichever record wins, both sources saw this session.
+            record_contributor(existing, source)
             if better(candidate, existing):
                 # Overwrite in place rather than delete-and-insert: the row id is
                 # what any journal or compliance record points at.
@@ -170,6 +172,7 @@ def _apply(db: Session, user_id, source: str, rec: NormalizedRecord) -> None:
         stmt = pg_insert(Workout).values(
             user_id=user_id,
             source=source,
+            contributing_sources=[source],
             source_record_id=rec.source_record_id,
             sport=p.get("sport"),
             started_at=p["started_at"],

@@ -32,6 +32,12 @@ struct SubscriptionPanel: View {
                          destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
                         .font(Theme.Font.caption)
                         .tint(Theme.Palette.accent)
+                    // Still reachable while subscribed: someone paying should
+                    // be able to see what they are paying for, and the App
+                    // Store review screenshot has to come from somewhere.
+                    Button("See plans") { showingPaywall = true }
+                        .font(Theme.Font.caption)
+                        .tint(Theme.Palette.textDim)
                 }
             }
         }

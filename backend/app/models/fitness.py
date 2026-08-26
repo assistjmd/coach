@@ -41,6 +41,14 @@ class Workout(Base):
     avg_power_w: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tss: Mapped[float | None] = mapped_column(Float, nullable=True)
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Every source that independently recorded this session, including the one
+    # in `source` that we kept. Dedup used to delete the losers outright, which
+    # threw away the most defensible thing we know about a workout: that three
+    # devices saw it and we chose the record with power data.
+    #
+    # Provenance, not decoration. It is what makes "we reconcile across sources"
+    # a checkable claim rather than a description of code nobody can see.
+    contributing_sources: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

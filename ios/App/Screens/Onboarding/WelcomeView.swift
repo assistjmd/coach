@@ -31,11 +31,11 @@ struct WelcomeView: View {
                 Spacer(minLength: 32)
 
                 VStack(alignment: .leading, spacing: 0) {
-                    Claim("Daily readiness from your HRV, sleep and recent load", index: 0)
+                    Claim("A readiness read each morning, from your sleep and recent training", index: 0)
                     Divider().overlay(Theme.Palette.line)
-                    Claim("A session for today, tuned to what your body did last night", index: 1)
+                    Claim("One specific session for today, not a plan to interpret", index: 1)
                     Divider().overlay(Theme.Palette.line)
-                    Claim("Ask anything — answered with your own numbers", index: 2)
+                    Claim("Ask anything, answered with your own numbers", index: 2)
                 }
                 .opacity(appeared ? 1 : 0)
 
@@ -72,6 +72,10 @@ private struct Claim: View {
                 .font(.system(size: 16, weight: .medium))
                 .lineSpacing(2)
                 .foregroundStyle(Theme.Palette.text)
+                // Without this the line is clipped at one line rather than
+                // wrapping — a Text beside a Spacer will shrink before it grows.
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
             Spacer(minLength: 0)
         }
         .padding(.vertical, 16)

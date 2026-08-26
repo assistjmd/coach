@@ -133,3 +133,54 @@ def test_iso_strings_are_accepted(db):
     assert find_duplicate(
         db, user.id, "2026-08-24T08:00:30-04:00", "2026-08-24T08:41:00-04:00"
     ) is not None
+
+
+class TestProvenanceSurvives:
+    """Dedup used to delete the losing records outright, throwing away the most
+    defensible thing we know about a session: that three devices saw it and we
+    kept the one with power data. That evidence is the substance behind
+    reconciling across sources."""
+
+    def test_every_source_that_saw_it_is_remembered(self, db):
+        user = _user(db, "prov@example.com")
+        _add(db, user, "strava", "s1", NOON, 42, avg_hr=87)
+        _add(db, user, "healthkit", "hk1", NOON, 41, avg_hr=87)
+        _add(db, user, "oura", "o1", NOON, 41)
+        db.commit()
+
+        collapse_existing(db, user.id)
+        w = db.query(Workout).filter(Workout.user_id == user.id).one()
+        assert set(w.contributing_sources) == {"strava", "healthkit", "oura"}
+
+    def test_the_kept_source_is_still_identifiable(self, db):
+        """Which one won matters as much as which ones agreed."""
+        user = _user(db, "kept@example.com")
+        _add(db, user, "healthkit", "hk1", NOON, 41)
+        _add(db, user, "strava", "s1", NOON, 42, avg_hr=150, distance_m=8000)
+        db.commit()
+
+        collapse_existing(db, user.id)
+        w = db.query(Workout).filter(Workout.user_id == user.id).one()
+        assert w.source == "strava", "the richer record wins"
+        assert set(w.contributing_sources) == {"strava", "healthkit"}
+
+    def test_a_single_source_session_lists_only_itself(self, db):
+        user = _user(db, "solo@example.com")
+        _add(db, user, "healthkit", "hk1", NOON, 41)
+        db.commit()
+        collapse_existing(db, user.id)
+        w = db.query(Workout).filter(Workout.user_id == user.id).one()
+        assert w.contributing_sources in (None, ["healthkit"])
+
+    def test_the_list_is_stable_between_runs(self, db):
+        """Read back and shown to the athlete, so an order that shifts between
+        syncs would look like the data changed when it did not."""
+        user = _user(db, "stable@example.com")
+        _add(db, user, "strava", "s1", NOON, 42, avg_hr=87)
+        _add(db, user, "healthkit", "hk1", NOON, 41, avg_hr=87)
+        db.commit()
+
+        collapse_existing(db, user.id)
+        first = list(db.query(Workout).filter(Workout.user_id == user.id).one().contributing_sources)
+        collapse_existing(db, user.id)
+        assert db.query(Workout).filter(Workout.user_id == user.id).one().contributing_sources == first

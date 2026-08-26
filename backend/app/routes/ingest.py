@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -6,8 +6,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.analytics.dedupe import better, collapse_existing, find_duplicate
-from app.analytics.sleep_repair import collapse_nights
+from app.analytics.dedupe import (
+    better,
+    collapse_existing,
+    find_duplicate,
+    record_contributor,
+)
+from app.analytics.sleep_repair import combine, clamp_to_window, collapse_nights
 from app.auth.deps import current_user
 from app.db import get_db
 from app.models import (
@@ -128,24 +133,7 @@ def ingest_healthkit(
 
     written = IngestSummary(
         workouts=_ingest_workouts(db, user, batch.workouts, src),
-        sleep=_upsert(
-            db,
-            SleepSession,
-            "uq_sleep_source_id",
-            lambda s: s.source_record_id,
-            batch.sleep,
-            lambda s: dict(
-                user_id=user.id,
-                source=src,
-                source_record_id=s.source_record_id,
-                started_at=s.started_at,
-                ended_at=s.ended_at,
-                deep_s=s.deep_s,
-                light_s=s.light_s,
-                rem_s=s.rem_s,
-                awake_s=s.awake_s,
-            ),
-        ),
+        sleep=_ingest_sleep(db, user, batch.sleep, src),
         # HealthKit reports SDNN; Oura reports rMSSD. Separate columns, never coerced.
         hrv=_upsert(
             db,
@@ -214,6 +202,7 @@ def _ingest_workouts(db: Session, user: User, incoming, src: str) -> int:
                 source=src, sport=w.sport, avg_hr=w.avg_hr,
                 max_hr=w.max_hr, distance_m=w.distance_m,
             )
+            record_contributor(existing, src)
             if better(candidate, existing):
                 existing.source = src
                 existing.source_record_id = w.source_record_id
@@ -224,11 +213,13 @@ def _ingest_workouts(db: Session, user: User, incoming, src: str) -> int:
                 existing.distance_m = w.distance_m or existing.distance_m
                 existing.avg_hr = w.avg_hr or existing.avg_hr
                 existing.max_hr = w.max_hr or existing.max_hr
+            record_contributor(existing, existing.source)
             continue
 
         db.add(Workout(
             user_id=user.id,
             source=src,
+            contributing_sources=[src],
             source_record_id=w.source_record_id,
             sport=w.sport,
             started_at=w.started_at,
@@ -241,6 +232,73 @@ def _ingest_workouts(db: Session, user: User, incoming, src: str) -> int:
         db.flush()
         written += 1
     return written
+
+
+def _ingest_sleep(db: Session, user: User, incoming, src: str) -> int:
+    """Write sleep, reconciling against nights we already hold.
+
+    A night reaches us in pieces: the client reads Apple Health through an
+    anchored query, so each sync carries whichever stage samples are new, and
+    the row was keyed on whichever fragment happened to come first. Every sync
+    that caught part of a night therefore created another night.
+
+    Matching on overlap instead, and merging with the same rules the repair job
+    uses, so ingestion and repair cannot disagree about what a night is.
+    """
+    written = 0
+    for s in sorted(incoming, key=lambda x: x.started_at):
+        candidate = SleepSession(
+            user_id=user.id,
+            source=src,
+            source_record_id=s.source_record_id,
+            started_at=s.started_at,
+            ended_at=s.ended_at,
+            deep_s=s.deep_s,
+            light_s=s.light_s,
+            rem_s=s.rem_s,
+            awake_s=s.awake_s,
+        )
+        existing = _overlapping_night(db, user, src, s.started_at, s.ended_at)
+        if existing is not None:
+            how = (
+                "overlapping"
+                if candidate.started_at < existing.ended_at
+                and candidate.ended_at > existing.started_at
+                else "adjacent"
+            )
+            earlier, later = (
+                (existing, candidate)
+                if existing.started_at <= candidate.started_at
+                else (candidate, existing)
+            )
+            if earlier is candidate:
+                # The new report starts first, so it defines the night's start.
+                existing.started_at = candidate.started_at
+            combine(existing, later if later is candidate else earlier, how)
+            clamp_to_window(existing)
+            continue
+
+        db.add(candidate)
+        db.flush()
+        clamp_to_window(candidate)
+        written += 1
+    return written
+
+
+def _overlapping_night(db: Session, user: User, src: str, start, end):
+    """A night from the same source that this one continues or restates."""
+    window = timedelta(minutes=90)
+    return (
+        db.query(SleepSession)
+        .filter(
+            SleepSession.user_id == user.id,
+            SleepSession.source == src,
+            SleepSession.started_at <= end + window,
+            SleepSession.ended_at >= start - window,
+        )
+        .order_by(SleepSession.started_at)
+        .first()
+    )
 
 
 def _upsert(db: Session, model, constraint: str, key, items: list, to_row) -> int:

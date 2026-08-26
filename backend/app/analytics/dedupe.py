@@ -121,6 +121,20 @@ def better(incoming: Workout, existing: Workout) -> bool:
     return _completeness(incoming) > _completeness(existing)
 
 
+def record_contributor(kept: Workout, source: str) -> None:
+    """Note that `source` also saw this session.
+
+    Kept whichever record wins, so the surviving row carries the full list of
+    devices that agreed. Sorted and deduplicated because this is read back and
+    shown to the athlete, and an order that shifts between syncs would look
+    like the data changed when it did not.
+    """
+    seen = set(kept.contributing_sources or [])
+    seen.add(kept.source)
+    seen.add(source)
+    kept.contributing_sources = sorted(seen)
+
+
 def collapse_existing(db: Session, user_id) -> int:
     """Merge duplicates already in the table.
 
@@ -147,11 +161,18 @@ def collapse_existing(db: Session, user_id) -> int:
         if match is None:
             kept.append(w)
             continue
-        # Keep whichever record carries more signal, drop the other.
+        # Keep whichever record carries more signal, drop the other — but keep
+        # the fact that both saw it.
         if better(w, match):
+            record_contributor(w, match.source)
+            for s in (match.contributing_sources or []):
+                record_contributor(w, s)
             kept[kept.index(match)] = w
             db.delete(match)
         else:
+            record_contributor(match, w.source)
+            for s in (w.contributing_sources or []):
+                record_contributor(match, s)
             db.delete(w)
         removed += 1
 
