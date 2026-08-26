@@ -38,6 +38,27 @@ class OuraProvider:
     info = ProviderInfo(slug="oura", display_name="Oura Ring", auth_kind="oauth2")
     scopes = _SCOPES
 
+    # An alternative route for anyone who cannot connect directly — which, until
+    # Oura approves the app, is everyone past the tenth user.
+    #
+    # It is genuinely worse and the copy says so. Oura does not write HRV to
+    # Apple Health (nor does Whoop, nor Garmin), and its own readiness score
+    # never leaves its API. Sleep, heart rate and resting heart rate do come
+    # across, which is most of what the brief reads.
+    workaround_title = "Connect Oura through Apple Health"
+    workaround_steps = [
+        "Open the Oura app and tap the menu icon.",
+        "Go to Settings, then Data Sharing, then Apple Health.",
+        "Turn on Connect to Health.",
+        "Allow the categories Apple asks about — sleep, heart rate, "
+        "resting heart rate, steps and workouts.",
+        "Come back here and connect Apple Health if you have not already.",
+        "One thing to know: Oura does not send HRV or its own readiness score "
+        "to Apple Health. Connecting Oura directly here gives me both, and a "
+        "sharper read. Apple Health still gets me your sleep and heart rate, "
+        "which is most of it.",
+    ]
+
     def oauth_authorize_url(self, state: str) -> str:
         cfg = settings()
         params = {

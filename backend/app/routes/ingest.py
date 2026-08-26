@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.analytics.dedupe import better, collapse_existing, find_duplicate
+from app.analytics.sleep_repair import collapse_nights
 from app.auth.deps import current_user
 from app.db import get_db
 from app.models import (
@@ -105,10 +106,16 @@ def repair_duplicates(
     appears several times, and the coach reads that history — so the inflated
     load keeps driving the prescription until it is cleaned up.
 
+    Also merges fragmented sleep. Apple Health records a night as dozens of
+    stage samples, and rows written before that was fixed are still one session
+    per fragment — which is nonsense for the coach to reason about and, at
+    hundreds of rows, most of the model context it is sent.
+
     Safe to run repeatedly: with nothing left to merge it removes nothing.
     """
-    removed = collapse_existing(db, user.id)
-    return {"removed": removed}
+    workouts = collapse_existing(db, user.id)
+    nights = collapse_nights(db, user.id)
+    return {"removed": workouts, "sleep_merged": nights}
 
 
 @router.post("/healthkit", response_model=IngestSummary)

@@ -53,6 +53,27 @@ _MAX_PAGES = 20
 
 
 class StravaProvider:
+    # See the note on OuraProvider. Strava's own cap is ten connected athletes
+    # until they review the app, so this is the route most people will need.
+    #
+    # The loss here is heart rate: Strava sends activity type, distance, time
+    # and calories to Apple Health, not HR. Without it a session is scored by
+    # the duration estimate rather than TRIMP. Anyone recording on an Apple
+    # Watch is unaffected — the Watch writes its own record with heart rate, and
+    # we keep whichever copy carries more signal.
+    workaround_title = "Connect Strava through Apple Health"
+    workaround_steps = [
+        "Open Strava and go to the You tab, then tap the settings icon.",
+        "Tap Manage Apps and Devices, then Health, then the plus icon.",
+        "Tap Connect, then enable Workouts & Routes.",
+        "Turn on Send to Health.",
+        "Come back here and connect Apple Health if you have not already.",
+        "One thing to know: Strava does not send heart rate to Apple Health, so "
+        "I score those sessions by duration rather than effort. If you record "
+        "on an Apple Watch I get the heart rate anyway. Connecting Strava "
+        "directly here is still the better read.",
+    ]
+
     info = ProviderInfo(slug="strava", display_name="Strava", auth_kind="oauth2")
     scopes = _SCOPES
 

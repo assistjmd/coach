@@ -121,6 +121,19 @@ private struct ProviderRowView: View {
                         if p.isAnnounced { soonChip }
                     }
                     status
+                    if p.hasWorkaround && !p.isAnnounced && !p.connected {
+                        Button { showingWorkaround = true } label: {
+                            HStack(spacing: 4) {
+                                Text("or connect via Apple Health")
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 9, weight: .semibold))
+                            }
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Palette.accent)
+                        }
+                        .buttonStyle(PressStyle())
+                        .padding(.top, 2)
+                    }
                 }
                 Spacer(minLength: 8)
                 if isBusy {
@@ -134,7 +147,11 @@ private struct ProviderRowView: View {
         // athlete can act on should not look as inert as one they cannot.
         .opacity(p.isAnnounced && !p.hasWorkaround ? 0.6 : 1)
         .contentShape(Rectangle())
-        .onTapGesture { if p.hasWorkaround { showingWorkaround = true } }
+        .onTapGesture {
+            // Only for announced rows: on a live provider the Connect button is
+            // the action, and a whole-row tap doing something else is a trap.
+            if p.hasWorkaround && p.isAnnounced { showingWorkaround = true }
+        }
         .sheet(isPresented: $showingWorkaround) {
             WorkaroundSheet(
                 providerName: p.displayName,
