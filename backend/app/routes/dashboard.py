@@ -9,6 +9,7 @@ from app.ai.brief import generate_daily_brief
 from app.ai.adjust import NoSessionToday, adjust_session
 from app.analytics.consistency import consistency
 from app.auth.deps import current_user
+from app.entitlement import require as paid
 from app.dates import today_for
 from app.db import get_db
 from app.quota import enforce
@@ -73,7 +74,7 @@ class TodayBrief(BaseModel):
 
 
 @router.get("/today", response_model=TodayBrief)
-def today(user: User = Depends(current_user), db: Session = Depends(get_db)) -> TodayBrief:
+def today(user: User = Depends(paid), db: Session = Depends(get_db)) -> TodayBrief:
     # The user's today, not the server's. On Fly the server is UTC, which
     # rolls over at 7pm in Boston — the dashboard would start asking for a
     # brief that does not exist yet and fall back to yesterday's.
@@ -135,7 +136,7 @@ class AdjustResponse(BaseModel):
 @router.post("/today/adjust", response_model=AdjustResponse)
 def adjust_today(
     body: AdjustBody,
-    user: User = Depends(current_user),
+    user: User = Depends(paid),
     db: Session = Depends(get_db),
 ) -> AdjustResponse:
     """Let the athlete talk Will into changing today's session.

@@ -21,6 +21,10 @@ dependencies = [
     "requests>=2.32",
     "python-multipart>=0.0.12",
     "boto3>=1.35",
+    # Apple's own library. Transaction payloads are JWS signed by Apple and must
+    # be verified against their certificate chain — hand-rolling that check is
+    # how apps end up trusting a forged receipt.
+    "app-store-server-library>=3.1",
 ]
 
 [project.optional-dependencies]

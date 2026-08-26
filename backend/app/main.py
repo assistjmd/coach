@@ -16,6 +16,7 @@ from app.routes import insights as insights_routes
 from app.routes import legal as legal_routes
 from app.routes import me as me_routes
 from app.routes import providers as provider_routes
+from app.routes import subscriptions as subscription_routes
 
 
 @asynccontextmanager
@@ -77,6 +78,7 @@ app.include_router(chat_routes.router)
 app.include_router(goal_routes.router)
 app.include_router(insights_routes.router)
 app.include_router(export_routes.router)
+app.include_router(subscription_routes.router)
 app.include_router(legal_routes.router)
 
 if settings().app_env == "dev":

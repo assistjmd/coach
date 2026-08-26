@@ -13,6 +13,7 @@ from app.models.goal import Goal
 from app.models.legal_consent import LegalConsent
 from app.models.oauth_state import OAuthStateUse
 from app.models.oauth_token import OAuthToken
+from app.models.subscription import Subscription
 from app.models.user import User
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "OAuthToken",
     "ReadinessScore",
     "SleepSession",
+    "Subscription",
     "User",
     "Workout",
 ]

@@ -10,6 +10,7 @@ from app.ai.chat import stream_chat
 from app.auth.deps import current_user
 from app.config import settings
 from app.db import SessionLocal, get_db
+from app.entitlement import require as paid
 from app.quota import enforce, limit_for, used_recently
 from app.models import ChatMessage, User
 
@@ -51,7 +52,7 @@ def quota(user: User = Depends(current_user), db: Session = Depends(get_db)) -> 
 
 
 @router.post("")
-def chat(body: ChatBody, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def chat(body: ChatBody, user: User = Depends(paid), db: Session = Depends(get_db)):
     # Session adjustment has its own allowance — see app/quota.py.
     enforce(db, user, kind="chat")
 

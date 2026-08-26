@@ -64,6 +64,24 @@ class Settings(BaseSettings):
     # Separate from chat. Deliberately small: this runs on the expensive model,
     # and a seventh revision in one day is arguing, not training.
     adjust_daily_limit: int = 6
+
+    # Subscription. The trial runs on our clock, not Apple's: a StoreKit
+    # introductory offer needs a payment method on day zero, and asking an
+    # unknown app's first users for a card before they have seen a single brief
+    # costs more installs than it earns subscriptions.
+    trial_days: int = 14
+    subscription_product_ids: str = "com.trainwithcoach.app.monthly,com.trainwithcoach.app.yearly"
+    # Apple's App Store Server Notifications and transaction JWS both carry an
+    # environment. Verifying against the wrong one rejects every sandbox
+    # purchase, which is every purchase during TestFlight.
+    apple_iap_bundle_id: str = "com.trainwithcoach.app"
+    # Apple's numeric id for the app. Required by SignedDataVerifier whenever the
+    # environment is Production — without it every real purchase raises rather
+    # than verifying, which is the sort of thing that only shows up on launch day.
+    apple_app_apple_id: int = 6797961960
+    # Turn on to require a subscription. Off until the products exist in App
+    # Store Connect, so a deploy cannot lock out every current tester.
+    subscriptions_enforced: bool = False
     chat_max_output_tokens: int = 700
 
     oura_client_id: str = ""

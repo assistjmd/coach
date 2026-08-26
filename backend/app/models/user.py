@@ -23,6 +23,12 @@ class User(Base):
     # Nullable: accounts created before the gate existed have no answer, and
     # inventing one would be worse than an honest null.
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # When the free trial ends. Set at account creation and never extended, so
+    # deleting and recreating an account is the only way to get a second one —
+    # and that costs the athlete all their history, which is a fair price.
+    trial_ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # Server-side rather than a client flag: a local flag would re-run onboarding
     # after a reinstall or on a second device, for a user who already has a goal.
     onboarded_at: Mapped[datetime | None] = mapped_column(
