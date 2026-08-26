@@ -120,9 +120,9 @@ private struct ProviderRowView: View {
                         Text(p.displayName.uppercased())
                             .font(.system(size: 15, weight: .heavy))
                             .tracking(0.8)
-                            .foregroundStyle(
-                                p.isAnnounced ? Theme.Palette.textDim : Theme.Palette.text
-                            )
+                            // Full strength even when announced: a row you can
+                            // act on must not look disabled.
+                            .foregroundStyle(Theme.Palette.text)
                         if p.isAnnounced { soonChip }
                     }
                     status
@@ -135,9 +135,9 @@ private struct ProviderRowView: View {
                 }
             }
         }
-        // Dimmed, but less so when there is something to do about it. A row the
-        // athlete can act on should not look as inert as one they cannot.
-        .opacity(p.isAnnounced && !p.hasWorkaround ? 0.6 : 1)
+        // No dimming. Every one of these rows leads somewhere, and opacity was
+        // the loudest "unavailable" signal on the screen.
+        .opacity(1)
         .contentShape(Rectangle())
         .onTapGesture {
             // Announced rows only: on a live provider the Connect button owns
@@ -160,11 +160,13 @@ private struct ProviderRowView: View {
         Text("SOON")
             .font(.system(size: 9, weight: .heavy))
             .tracking(1.0)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .foregroundStyle(Theme.Palette.caution)
-            .overlay(Rectangle().stroke(Theme.Palette.caution, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 2))
+            // Muted rather than amber: this is a status, not a warning, and in
+            // caution colour it competed with the action beside it.
+            .foregroundStyle(Theme.Palette.textDim)
+            .background(Theme.Palette.surfaceHigh)
+            .clipShape(Capsule())
     }
 
     /// Whether this source is actually delivering data, as opposed to merely
@@ -183,10 +185,27 @@ private struct ProviderRowView: View {
     @ViewBuilder
     private var status: some View {
         if p.isAnnounced {
-            Text(p.hasWorkaround ? "Coming soon — tap for how to connect it now"
-                                 : "Coming soon")
-                .font(Theme.Font.caption)
-                .foregroundStyle(Theme.Palette.textDim)
+            if p.hasWorkaround {
+                // Reads as a button because it behaves like one. Grey caption
+                // text under a "SOON" chip looks like an apology, and nobody
+                // taps an apology.
+                HStack(spacing: 5) {
+                    Text("Connect it now")
+                        .font(.system(size: 14, weight: .semibold))
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .foregroundStyle(Theme.Palette.accent)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Theme.Palette.accent.opacity(0.14))
+                .clipShape(Capsule())
+                .padding(.top, 2)
+            } else {
+                Text("Coming soon")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Palette.textDim)
+            }
         } else if p.slug == "healthkit" {
             healthKitStatus
         } else if let err = p.lastSyncError {
