@@ -82,6 +82,13 @@ class Settings(BaseSettings):
     # Turn on to require a subscription. Off until the products exist in App
     # Store Connect, so a deploy cannot lock out every current tester.
     subscriptions_enforced: bool = False
+
+    # Direct provider connections, off for launch. Everything routes through
+    # Apple Health instead, which has no approval to wait on and no per-app user
+    # cap — Strava stops an unreviewed app at ten connected athletes and Oura at
+    # ten users, so shipping those buttons publicly would break the app for the
+    # eleventh person to install it. Flip on per provider as approvals land.
+    direct_providers_enabled: bool = False
     chat_max_output_tokens: int = 700
 
     oura_client_id: str = ""

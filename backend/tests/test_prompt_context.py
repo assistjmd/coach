@@ -45,3 +45,53 @@ def test_no_goal_is_simply_omitted():
 
 def test_anonymous_user_has_a_placeholder():
     assert "(anonymous)" in user_context_block({"display_name": None})
+
+
+class TestAbsentDataIsAbsent:
+    """The coach should never open by naming what the athlete's setup lacks.
+
+    `"hrv": []` in the context is an explicit statement that HRV is missing, and
+    the model quite reasonably mentions it — which on the home screen becomes a
+    daily complaint about equipment they do not own. Most people have sleep and
+    workouts and no HRV.
+    """
+
+    def test_empty_sections_are_dropped(self, db, user):
+        from app.ai.data import gather_recent
+
+        snap = gather_recent(db, user, days=14)
+        for key in ("hrv", "readiness", "workouts", "sleep", "body_metrics"):
+            assert snap.get(key) != [], f"{key} is present but empty"
+
+    def test_sections_with_data_survive(self, db, user):
+        from datetime import datetime, timezone
+
+        from app.ai.data import gather_recent
+        from app.models import Workout
+
+        db.add(Workout(
+            user_id=user.id, source="healthkit", source_record_id="w1",
+            started_at=datetime(2026, 8, 25, 12, tzinfo=timezone.utc),
+            ended_at=datetime(2026, 8, 25, 13, tzinfo=timezone.utc),
+            duration_s=3600, sport="running", avg_hr=150,
+        ))
+        db.commit()
+
+        snap = gather_recent(db, user, days=14)
+        assert len(snap["workouts"]) == 1
+        assert "hrv" not in snap
+
+    def test_the_goal_survives_being_unset(self, db, user):
+        """A missing goal is actionable — the athlete can set one. A missing
+        sensor is not."""
+        from app.ai.data import gather_recent
+
+        assert "goal" in gather_recent(db, user, days=14)
+
+    def test_the_prompt_forbids_naming_missing_metrics(self):
+        from app.ai.prompts import SYSTEM_PROMPT
+
+        assert "Do not list what is missing" in SYSTEM_PROMPT
+        assert "never ask them to connect something" in SYSTEM_PROMPT
+        # The rule that must survive alongside it.
+        assert "Never invent or estimate a number" in SYSTEM_PROMPT

@@ -14,7 +14,9 @@ from app.providers.announced import NotYetAvailable
 
 # Garmin only. Google Health flips to the real provider as soon as its
 # credentials exist — see `test_google_health_is_announced_only_without_creds`.
-ANNOUNCED = ("garmin", "wahoo")
+# Every direct source is announced for launch: Apple Health is the only
+# route that has no approval to wait on and no per-app user cap.
+ANNOUNCED = ("garmin", "wahoo", "oura", "strava", "google_health")
 
 
 @pytest.mark.parametrize("slug", ANNOUNCED)
@@ -23,9 +25,6 @@ def test_listed_but_marked_unavailable(slug, client, auth):
     row = next(p for p in body["providers"] if p["slug"] == slug)
     assert row["available"] is False
     assert row["connected"] is False
-    # The note is what the row actually renders. An empty one would leave the
-    # user staring at a greyed-out source with no explanation.
-    assert row["note"]
 
 
 @pytest.mark.parametrize("slug", ANNOUNCED)
@@ -47,36 +46,32 @@ def test_every_operation_refuses(slug):
         p.sync(None, None)
 
 
-def test_live_providers_are_unaffected(client, auth):
+def test_apple_health_leads_and_is_connectable(client, auth):
+    """The only source everyone can use, so it goes first and stays live."""
     body = client.get("/v1/me", headers=auth).json()
+    assert body["providers"][0]["slug"] == "healthkit"
     live = {p["slug"]: p for p in body["providers"] if p["available"]}
-    assert {"oura", "strava", "healthkit"} <= set(live)
-    assert all(p["note"] is None for p in live.values())
+    assert "healthkit" in live
 
 
-def test_google_health_is_announced_only_without_creds():
-    """The row must not offer Connect in an environment with no client id.
+def test_a_direct_provider_needs_both_the_flag_and_credentials():
+    """Credentials alone must not turn a Connect button on.
 
-    Otherwise the failure lands after the user has already left the app for
-    Google's consent screen, which reads as the app being broken rather than
-    the integration not being configured.
+    Strava caps an unreviewed app at ten connected athletes and Oura at ten
+    users, so a configured-but-unapproved provider going live publicly hands a
+    403 to the eleventh person who installs the app.
     """
-    from app.providers.announced import GOOGLE_HEALTH
     from app.providers.google_health import GoogleHealthProvider
 
     p = get_provider("google_health")
-    if settings().google_health_client_id:
+    if settings().direct_providers_enabled and settings().google_health_client_id:
         assert isinstance(p, GoogleHealthProvider)
-        assert p.info.availability == "live"
     else:
-        assert p is GOOGLE_HEALTH
         assert p.info.availability == "coming_soon"
 
 
-def test_announced_sort_after_live():
-    """Real sources first. A list that opens with two things you can't use reads
-    as a product that doesn't work."""
+def test_the_connectable_source_comes_first():
+    """A list that opens with things you cannot use reads as a broken product."""
     slugs = [p.info.slug for p in all_providers()]
-    first_announced = min(slugs.index(s) for s in ANNOUNCED)
-    last_live = max(slugs.index(s) for s in ("oura", "strava", "healthkit"))
-    assert last_live < first_announced
+    assert slugs[0] == "healthkit"
+    assert min(slugs.index(s) for s in ANNOUNCED) > slugs.index("healthkit")

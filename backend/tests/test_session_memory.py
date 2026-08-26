@@ -79,7 +79,9 @@ def test_older_sessions_fall_outside_the_window(db, user):
         {"id": "old", "text": "Ancient history, 3x5"},
     ]))
     db.commit()
-    assert gather_recent(db, user, days=14)["recent_sessions"] == []
+    # Absent rather than empty: sections with nothing in them are dropped from
+    # the context so the coach is not handed a list of what it does not have.
+    assert gather_recent(db, user, days=14).get("recent_sessions", []) == []
 
 
 def test_a_lifting_session_is_not_truncated_to_five_items():
@@ -98,4 +100,6 @@ def test_items_beyond_the_cap_are_still_dropped():
 
 
 def test_no_sessions_yet_is_an_empty_list_not_an_error(db, user):
-    assert gather_recent(db, user, days=14)["recent_sessions"] == []
+    # Absent rather than empty: sections with nothing in them are dropped from
+    # the context so the coach is not handed a list of what it does not have.
+    assert gather_recent(db, user, days=14).get("recent_sessions", []) == []

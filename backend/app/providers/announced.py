@@ -77,9 +77,7 @@ class AnnouncedProvider:
 GARMIN = AnnouncedProvider(
     slug="garmin",
     display_name="Garmin",
-    note="Direct sync is pending Garmin's approval. Until then your watch can "
-    "reach Coach Will through Apple Health, and it takes about a minute to "
-    "set up.",
+    note=None,
     workaround_title="Connect Garmin through Apple Health",
     workaround_steps=[
         "Open the Garmin Connect app.",
@@ -96,13 +94,55 @@ GARMIN = AnnouncedProvider(
 WAHOO = AnnouncedProvider(
     slug="wahoo",
     display_name="Wahoo",
-    note="Requested by a tester with an ELEMNT. Wahoo approves each app by "
-    "hand — the integration is built and waiting on them.",
+    note=None,
+    workaround_title="Connect Wahoo through Apple Health",
+    workaround_steps=[
+        "Open the Wahoo app and go to your profile.",
+        "Tap Apple Health, then turn on the connection.",
+        "Allow the categories Apple asks about — workouts and heart rate.",
+        "Come back here and connect Apple Health if you have not already.",
+        "Rides sync to Apple Health as your ELEMNT uploads them.",
+    ],
 )
 
 GOOGLE_HEALTH = AnnouncedProvider(
     slug="google_health",
     display_name="Google Health",
-    note="In build. This is where Fitbit data will arrive too — Fitbit's own API "
-    "shuts down in September 2026 and moves here.",
+    note=None,
+    workaround_title="Fitbit and Pixel through Apple Health",
+    workaround_steps=[
+        "Open the Fitbit app and go to your profile, then Fitbit settings.",
+        "Tap Apple Health and turn on the connection.",
+        "Allow the categories Apple asks about — activity, sleep and heart rate.",
+        "Come back here and connect Apple Health if you have not already.",
+    ],
+)
+
+OURA = AnnouncedProvider(
+    slug="oura",
+    display_name="Oura Ring",
+    note=None,
+    workaround_title="Connect Oura through Apple Health",
+    workaround_steps=[
+        "Open the Oura app and tap the menu icon.",
+        "Go to Settings, then Data Sharing, then Apple Health.",
+        "Turn on Connect to Health.",
+        "Allow the categories Apple asks about — sleep, heart rate, "
+        "resting heart rate, steps and workouts.",
+        "Come back here and connect Apple Health if you have not already.",
+    ],
+)
+
+STRAVA = AnnouncedProvider(
+    slug="strava",
+    display_name="Strava",
+    note=None,
+    workaround_title="Connect Strava through Apple Health",
+    workaround_steps=[
+        "Open Strava and go to the You tab, then tap the settings icon.",
+        "Tap Manage Apps and Devices, then Health, then the plus icon.",
+        "Tap Connect, then enable Workouts & Routes.",
+        "Turn on Send to Health.",
+        "Come back here and connect Apple Health if you have not already.",
+    ],
 )

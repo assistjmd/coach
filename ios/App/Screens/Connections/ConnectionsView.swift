@@ -60,16 +60,21 @@ struct ConnectionsView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 6) {
             SectionLabel("Your data")
-            Text("SOURCES")
-                .font(.system(size: 34, weight: .black))
-                .tracking(-0.5)
+            Text("Sources")
+                .font(Theme.Font.headline(32))
                 .foregroundStyle(Theme.Palette.text)
+            Text("Connect Apple Health and point your other apps at it. "
+                 + "Almost everything writes there — your watch, your ring, "
+                 + "your bike computer.")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.textDim)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 12)
-        .padding(.bottom, 6)
+        .padding(.bottom, 4)
     }
 
     /// Runs a connect/disconnect action, then always reloads so the row reflects
@@ -121,19 +126,6 @@ private struct ProviderRowView: View {
                         if p.isAnnounced { soonChip }
                     }
                     status
-                    if p.hasWorkaround && !p.isAnnounced && !p.connected {
-                        Button { showingWorkaround = true } label: {
-                            HStack(spacing: 4) {
-                                Text("or connect via Apple Health")
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 9, weight: .semibold))
-                            }
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(Theme.Palette.accent)
-                        }
-                        .buttonStyle(PressStyle())
-                        .padding(.top, 2)
-                    }
                 }
                 Spacer(minLength: 8)
                 if isBusy {
@@ -148,8 +140,8 @@ private struct ProviderRowView: View {
         .opacity(p.isAnnounced && !p.hasWorkaround ? 0.6 : 1)
         .contentShape(Rectangle())
         .onTapGesture {
-            // Only for announced rows: on a live provider the Connect button is
-            // the action, and a whole-row tap doing something else is a trap.
+            // Announced rows only: on a live provider the Connect button owns
+            // the tap, and a whole-row gesture doing something else is a trap.
             if p.hasWorkaround && p.isAnnounced { showingWorkaround = true }
         }
         .sheet(isPresented: $showingWorkaround) {
@@ -191,10 +183,10 @@ private struct ProviderRowView: View {
     @ViewBuilder
     private var status: some View {
         if p.isAnnounced {
-            Text(p.note ?? "Not available yet")
+            Text(p.hasWorkaround ? "Coming soon — tap for how to connect it now"
+                                 : "Coming soon")
                 .font(Theme.Font.caption)
                 .foregroundStyle(Theme.Palette.textDim)
-                .fixedSize(horizontal: false, vertical: true)
         } else if p.slug == "healthkit" {
             healthKitStatus
         } else if let err = p.lastSyncError {
@@ -247,15 +239,9 @@ private struct ProviderRowView: View {
     @ViewBuilder
     private var actionControl: some View {
         if p.isAnnounced {
-            if p.hasWorkaround {
-                // There is a route that works today, so this row is not dead.
-                SmallButton(title: "How to") { showingWorkaround = true }
-            } else {
-                // No button at all. A disabled "Connect" invites tapping and
-                // then does nothing, which reads as a broken app rather than a
-                // pending integration.
-                EmptyView()
-            }
+            // No button. The row itself opens the how-to when there is one, and
+            // a disabled "Connect" invites a tap that does nothing.
+            EmptyView()
         } else if p.slug == "healthkit" {
             // The server reports HealthKit as "connected" for every user, since it
             // can't see the device's permission state. What it means locally is:

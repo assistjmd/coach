@@ -22,6 +22,27 @@ from app.models import (
 
 
 def gather_recent(db: Session, user: User, days: int = 14) -> dict[str, Any]:
+    """Everything the coach reads, with the empty parts left out.
+
+    Sections with no rows are dropped rather than sent as empty lists. A key
+    reading `"hrv": []` is an explicit statement that HRV is missing, and the
+    model quite reasonably mentions it — which on the home screen turns into a
+    daily complaint about equipment the athlete does not own. What is absent
+    should simply be absent.
+    """
+    return _drop_empty(_gather(db, user, days))
+
+
+def _drop_empty(snap: dict[str, Any]) -> dict[str, Any]:
+    # `goal` is kept even when None: the coach needs to know a goal was never
+    # set, which is actionable, unlike a sensor that does not exist.
+    return {
+        k: v for k, v in snap.items()
+        if k in ("now", "window_days", "goal") or v
+    }
+
+
+def _gather(db: Session, user: User, days: int = 14) -> dict[str, Any]:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     return {
         "now": datetime.now(timezone.utc).isoformat(),
