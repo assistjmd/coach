@@ -6,6 +6,7 @@ from app.auth import apple
 from app.config import settings
 from app.jobs import scheduler
 from app.logging_filters import install as install_log_redaction
+from app.routes import admin as admin_routes
 from app.routes import auth as auth_routes
 from app.routes import chat as chat_routes
 from app.routes import dashboard as dashboard_routes
@@ -79,6 +80,7 @@ app.include_router(goal_routes.router)
 app.include_router(insights_routes.router)
 app.include_router(export_routes.router)
 app.include_router(subscription_routes.router)
+app.include_router(admin_routes.router)
 app.include_router(legal_routes.router)
 
 if settings().app_env == "dev":

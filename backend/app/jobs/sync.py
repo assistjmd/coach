@@ -21,7 +21,7 @@ from app.models import (
     SleepSession,
     Workout,
 )
-from app.providers import get_provider
+from app.providers import get_sync_provider
 from app.providers.base import NormalizedRecord, ReauthRequired
 from app.providers.google_health import AccountNotLinked
 from app.routes.providers import load_tokenset
@@ -95,7 +95,9 @@ def _sync_one_inner(token_id) -> int:
         tok = db.get(OAuthToken, token_id)
         if tok is None:
             return 0
-        provider = get_provider(tok.provider)
+        # The real implementation, even for a source we have stopped offering:
+        # an existing token still works and its owner still expects their data.
+        provider = get_sync_provider(tok.provider)
         if provider.info.auth_kind != "oauth2":
             return 0
         ts = load_tokenset(tok)

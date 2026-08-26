@@ -24,6 +24,19 @@ final class MorningNudge: ObservableObject {
     /// Without this, changing the time twice would leave three notifications.
     private static let requestID = "morning-brief"
 
+    /// Behaviour-driven reminders, re-armed from the day's actual state every
+    /// time the app opens.
+    ///
+    /// All local. A dormancy nudge scheduled four days out and cancelled on the
+    /// next launch fires only for someone who stopped opening the app, which is
+    /// exactly the reach of a push campaign without any of the infrastructure
+    /// — no APNs certificate, no device-token registry, nothing to maintain.
+    private enum Nudge: String, CaseIterable {
+        case eveningSession = "evening-session"
+        case streakAtRisk = "streak-at-risk"
+        case dormant = "dormant"
+    }
+
     private enum Key {
         static let enabled = "nudge.enabled"
         static let hour = "nudge.hour"
@@ -74,8 +87,92 @@ final class MorningNudge: ObservableObject {
 
     func disable() {
         setEnabled(false)
-        UNUserNotificationCenter.current()
-            .removePendingNotificationRequests(withIdentifiers: [Self.requestID])
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.requestID] + Nudge.allCases.map(\.rawValue)
+        )
+    }
+
+    /// Re-arm the behaviour nudges from today's state.
+    ///
+    /// Called on every foreground. Each one is cleared first, so a session
+    /// ticked off at lunchtime removes the evening reminder rather than
+    /// nagging about work already done.
+    func refreshBehaviour(
+        sessionItems: Int,
+        completedItems: Int,
+        streak: Int,
+        hasBrief: Bool
+    ) async {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(
+            withIdentifiers: Nudge.allCases.map(\.rawValue)
+        )
+        guard enabled else { return }
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .authorized else { return }
+
+        let unfinished = hasBrief && sessionItems > 0 && completedItems < sessionItems
+
+        // At most one evening reminder. A streak worth protecting earns the
+        // stronger wording; the generic version covers everyone else.
+        if unfinished {
+            if streak >= 3 {
+                await schedule(
+                    .streakAtRisk,
+                    body: "\(streak) days running. Today's session is still open.",
+                    at: DateComponents(hour: 18, minute: 30)
+                )
+            } else {
+                await schedule(
+                    .eveningSession,
+                    body: "Today's session is still open.",
+                    at: DateComponents(hour: 18, minute: 30)
+                )
+            }
+        }
+
+        // Fires four days out and is cancelled by the next launch, so it only
+        // ever reaches someone who stopped coming back.
+        await scheduleAfter(
+            .dormant,
+            body: "Been a few days. Your numbers are still moving without you.",
+            days: 4
+        )
+    }
+
+    private func schedule(_ nudge: Nudge, body: String, at when: DateComponents) async {
+        // Not tomorrow's problem: a DateComponents trigger that has already
+        // passed today fires tomorrow, which is the behaviour we want.
+        await add(
+            nudge,
+            body: body,
+            trigger: UNCalendarNotificationTrigger(dateMatching: when, repeats: false)
+        )
+    }
+
+    private func scheduleAfter(_ nudge: Nudge, body: String, days: Int) async {
+        await add(
+            nudge,
+            body: body,
+            trigger: UNTimeIntervalNotificationTrigger(
+                timeInterval: TimeInterval(days * 24 * 60 * 60), repeats: false
+            )
+        )
+    }
+
+    private func add(_ nudge: Nudge, body: String, trigger: UNNotificationTrigger) async {
+        let content = UNMutableNotificationContent()
+        content.title = "Coach Will"
+        // Same rule as the morning nudge: nothing on a lock screen that another
+        // person could read as health data. A streak count is not a readiness
+        // score, and the session itself is never named.
+        content.body = body
+        content.sound = .default
+        try? await UNUserNotificationCenter.current().add(
+            UNNotificationRequest(
+                identifier: nudge.rawValue, content: content, trigger: trigger
+            )
+        )
     }
 
     func setTime(hour: Int, minute: Int) async {

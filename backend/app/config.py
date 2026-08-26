@@ -89,6 +89,10 @@ class Settings(BaseSettings):
     # ten users, so shipping those buttons publicly would break the app for the
     # eleventh person to install it. Flip on per provider as approvals land.
     direct_providers_enabled: bool = False
+
+    # Who may read aggregate product metrics. Empty closes the route entirely,
+    # which is the right default for an environment nobody configured.
+    admin_emails: str = ""
     chat_max_output_tokens: int = 700
 
     oura_client_id: str = ""

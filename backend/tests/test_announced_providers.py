@@ -75,3 +75,16 @@ def test_the_connectable_source_comes_first():
     slugs = [p.info.slug for p in all_providers()]
     assert slugs[0] == "healthkit"
     assert min(slugs.index(s) for s in ANNOUNCED) > slugs.index("healthkit")
+
+
+def test_closing_new_connections_does_not_break_existing_ones():
+    """Someone who connected Strava last week still has a valid token and still
+    expects their rides to arrive. The flag governs whether we hand out new
+    connections, not whether we honour the ones already open."""
+    from app.providers import get_sync_provider
+    from app.providers.strava import StravaProvider
+
+    if settings().strava_client_id:
+        assert isinstance(get_sync_provider("strava"), StravaProvider)
+    # And a source with no credentials at all still refuses, which is honest.
+    assert get_sync_provider("garmin").info.availability == "coming_soon"

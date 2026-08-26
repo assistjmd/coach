@@ -63,10 +63,47 @@ def _build() -> dict[str, Provider]:
 _PROVIDERS: dict[str, Provider] = _build()
 
 
+# The real implementation for every provider that has credentials, regardless of
+# whether new connections are being offered.
+_LIVE: dict[str, Provider] = {}
+
+
+def _build_live() -> dict[str, Provider]:
+    cfg = settings()
+    out: dict[str, Provider] = {"healthkit": HealthKitProvider()}
+    for slug, factory, configured in (
+        ("oura", OuraProvider, bool(cfg.oura_client_id)),
+        ("strava", StravaProvider, bool(cfg.strava_client_id)),
+        ("wahoo", WahooProvider, bool(cfg.wahoo_client_id)),
+        ("google_health", GoogleHealthProvider, bool(cfg.google_health_client_id)),
+    ):
+        if configured:
+            out[slug] = factory()
+    return out
+
+
+_LIVE = _build_live()
+
+
 def get_provider(slug: str) -> Provider:
+    """What the app offers. Announced providers refuse to connect."""
     if slug not in _PROVIDERS:
         raise KeyError(f"unknown provider: {slug}")
     return _PROVIDERS[slug]
+
+
+def get_sync_provider(slug: str) -> Provider:
+    """What actually moves data for a connection that already exists.
+
+    Closing new connections must not break the ones already open. Someone who
+    connected Strava last week still has a valid token and still expects their
+    rides to arrive; `direct_providers_enabled` governs whether we hand out new
+    connections, not whether we honour existing ones.
+
+    Falls back to the announced provider only when there are no credentials at
+    all, where refusing is the honest outcome.
+    """
+    return _LIVE.get(slug) or get_provider(slug)
 
 
 def all_providers() -> list[Provider]:

@@ -56,6 +56,7 @@ struct DashboardView: View {
                 ) { completed, logged in
                     ticked = Set(completed)
                     actuals = logged
+                    Task { await refreshNudges() }
                 } onAdjusted: { updated in
                     brief = updated
                     ticked = Set(updated.completedItems)
@@ -270,6 +271,21 @@ struct DashboardView: View {
         return first + " " + String(rest[...secondEnd])
     }
 
+    /// Re-arm the behaviour reminders from what today actually looks like.
+    ///
+    /// Done on every load rather than once: ticking the last item off at
+    /// lunchtime should remove the evening reminder, not leave it to nag about
+    /// work already finished.
+    private func refreshNudges() async {
+        guard let b = brief else { return }
+        await MorningNudge.shared.refreshBehaviour(
+            sessionItems: b.sessionItems.count,
+            completedItems: ticked.count,
+            streak: b.consistencyStreak ?? 0,
+            hasBrief: !b.stale
+        )
+    }
+
     // MARK: Load
 
     private func load() async {
@@ -278,6 +294,7 @@ struct DashboardView: View {
             ticked = Set(brief?.completedItems ?? [])
             actuals = brief?.itemActuals ?? [:]
             state = .loaded
+            await refreshNudges()
         } catch APIError.http(404, _) {
             state = .empty
         } catch {

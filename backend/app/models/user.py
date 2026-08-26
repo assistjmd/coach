@@ -29,6 +29,13 @@ class User(Base):
     trial_ends_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Last time the app made an authenticated request on this account. The only
+    # honest retention signal available: everything else measures data arriving,
+    # and a phone syncing HealthKit in the background is not a person opening
+    # the app. Written at most hourly, so it costs one UPDATE a session.
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     # Server-side rather than a client flag: a local flag would re-run onboarding
     # after a reinstall or on a second device, for a user who already has a goal.
     onboarded_at: Mapped[datetime | None] = mapped_column(
