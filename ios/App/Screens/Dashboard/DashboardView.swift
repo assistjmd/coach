@@ -14,6 +14,7 @@ struct DashboardView: View {
     @State private var showingSession = false
     @State private var showingReadiness = false
     @State private var showingConsistency = false
+    @ObservedObject private var store = Store.shared
 
     enum LoadState: Equatable {
         case loading
@@ -27,6 +28,12 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
+            // The paywall replaces Today rather than covering it. Today is the
+            // screen that costs money to produce, and a dismissible sheet over
+            // a fully working brief is not a paywall.
+            if store.needsPaywall {
+                PaywallView(blocking: true)
+            } else {
             ScreenBackground {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Theme.Metric.stack) {
@@ -44,6 +51,7 @@ struct DashboardView: View {
                 .refreshable { await load() }
             }
             .toolbar(.hidden, for: .navigationBar)
+            }
         }
         .sheet(isPresented: $showingSession) {
             if let b = brief {
@@ -71,6 +79,7 @@ struct DashboardView: View {
             // owns the first prompt — the system sheet is one-shot, so firing it
             // here would burn the single chance to ask before the explainer.
             await health.syncOnce()
+            await store.loadStatus()
             await load()
             withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
                 appeared = true

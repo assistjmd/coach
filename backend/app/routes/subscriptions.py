@@ -15,6 +15,7 @@ read. A client saying "I subscribed" is a claim; Apple's signature is the proof.
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -24,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.auth.deps import current_user
 from app.config import settings
 from app.db import get_db
+from app.analytics.pitch import build as build_pitch
 from app.entitlement import evaluate
 from app.models import Subscription, User
 from app.subscriptions.apple import VerificationError, verify_notification, verify_transaction
@@ -31,6 +33,16 @@ from app.subscriptions.apple import VerificationError, verify_notification, veri
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/subscriptions", tags=["subscriptions"])
+
+
+class PitchResponse(BaseModel):
+    """The case for subscribing, made from the athlete's own fortnight."""
+    lines: list[str] = []
+    sessions_completed: int | None = None
+    sessions_asked: int | None = None
+    workouts_logged: int | None = None
+    readiness_change: int | None = None
+    days_with_coach: int = 0
 
 
 class StatusResponse(BaseModel):
@@ -42,6 +54,7 @@ class StatusResponse(BaseModel):
     # False while the products do not exist in App Store Connect, so the client
     # knows not to show a paywall it cannot satisfy.
     enforced: bool
+    pitch: PitchResponse = PitchResponse()
 
 
 class VerifyBody(BaseModel):
@@ -57,6 +70,7 @@ def _status(db: Session, user: User) -> StatusResponse:
         expires_at=e.expires_at,
         product_id=e.product_id,
         enforced=settings().subscriptions_enforced,
+        pitch=PitchResponse(**asdict(build_pitch(db, user))),
     )
 
 

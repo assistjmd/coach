@@ -32,6 +32,7 @@ struct ProfileView: View {
                     header
                     goalPanel
                     saveRow
+                    SubscriptionPanel()
                     ReminderPanel()
                     ExportPanel()
                     signOutRow
