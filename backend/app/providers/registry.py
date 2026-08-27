@@ -27,14 +27,18 @@ from app.providers.strava import StravaProvider
 from app.providers.wahoo import WahooProvider
 
 
-def _live_or_announced(live_factory, announced, has_credentials: bool) -> Provider:
+def _enabled() -> set[str]:
+    return {s.strip() for s in settings().direct_providers.split(",") if s.strip()}
+
+
+def _live_or_announced(slug, live_factory, announced, has_credentials: bool) -> Provider:
     """The real provider only when it is both enabled and configured.
 
-    Registering a real provider without credentials would put a working Connect
-    button in front of the user and fail after they had already left the app for
-    a consent screen.
+    Both conditions, never one. Registering a real provider without credentials
+    would put a working Connect button in front of the user and fail only after
+    they had already left the app for a consent screen.
     """
-    if settings().direct_providers_enabled and has_credentials:
+    if slug in _enabled() and has_credentials:
         return live_factory()
     return announced
 
@@ -44,12 +48,17 @@ def _build() -> dict[str, Provider]:
     providers: dict[str, Provider] = {
         # First, and the only one everybody can use.
         "healthkit": HealthKitProvider(),
-        "oura": _live_or_announced(OuraProvider, OURA, bool(cfg.oura_client_id)),
-        "strava": _live_or_announced(StravaProvider, STRAVA, bool(cfg.strava_client_id)),
+        "oura": _live_or_announced("oura", OuraProvider, OURA, bool(cfg.oura_client_id)),
+        "strava": _live_or_announced(
+            "strava", StravaProvider, STRAVA, bool(cfg.strava_client_id)
+        ),
         "garmin": GARMIN,
-        "wahoo": _live_or_announced(WahooProvider, WAHOO, bool(cfg.wahoo_client_id)),
+        "wahoo": _live_or_announced(
+            "wahoo", WahooProvider, WAHOO, bool(cfg.wahoo_client_id)
+        ),
         "google_health": _live_or_announced(
-            GoogleHealthProvider, GOOGLE_HEALTH, bool(cfg.google_health_client_id)
+            "google_health", GoogleHealthProvider, GOOGLE_HEALTH,
+            bool(cfg.google_health_client_id),
         ),
     }
     if cfg.app_env == "dev":

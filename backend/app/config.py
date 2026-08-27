@@ -83,12 +83,17 @@ class Settings(BaseSettings):
     # Store Connect, so a deploy cannot lock out every current tester.
     subscriptions_enforced: bool = False
 
-    # Direct provider connections, off for launch. Everything routes through
-    # Apple Health instead, which has no approval to wait on and no per-app user
-    # cap — Strava stops an unreviewed app at ten connected athletes and Oura at
-    # ten users, so shipping those buttons publicly would break the app for the
-    # eleventh person to install it. Flip on per provider as approvals land.
-    direct_providers_enabled: bool = False
+    # Which direct connections to offer, by slug. Empty means Apple Health only.
+    #
+    # Per provider rather than one switch, because the caps differ by an order
+    # of magnitude. Strava stops an unreviewed app at ten connected athletes and
+    # Oura at ten users, so those stay closed until reviewed — the eleventh
+    # person to install would otherwise get a 403. Google Health allows a
+    # hundred before its security review, which is past any realistic beta.
+    #
+    # Turning one on still requires its credentials to exist; the flag alone
+    # cannot put a broken Connect button in front of anyone.
+    direct_providers: str = ""
 
     # Who may read aggregate product metrics. Empty closes the route entirely,
     # which is the right default for an environment nobody configured.

@@ -17,8 +17,9 @@ import sys
 
 from PIL import Image
 
-# 6.9 inch, the size App Store Connect currently asks for first.
-TARGET = (1320, 2868)
+# 6.5 inch. App Store Connect validates against the slot you drop into, not
+# against any accepted size, so this must match the box on screen.
+TARGET = (1284, 2778)
 # Theme.Palette.bg. Padding in anything else would show as a band.
 BG = (0x0B, 0x0B, 0x0D)
 OUT = pathlib.Path.home() / "Downloads" / "appstore-screenshots"

@@ -64,7 +64,7 @@ def test_a_direct_provider_needs_both_the_flag_and_credentials():
     from app.providers.google_health import GoogleHealthProvider
 
     p = get_provider("google_health")
-    if settings().direct_providers_enabled and settings().google_health_client_id:
+    if "google_health" in settings().direct_providers and settings().google_health_client_id:
         assert isinstance(p, GoogleHealthProvider)
     else:
         assert p.info.availability == "coming_soon"

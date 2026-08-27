@@ -1,5 +1,15 @@
 import SwiftUI
 
+struct HistoryPage: Decodable {
+    struct Message: Decodable {
+        let role: String
+        let content: String
+        let createdAt: Date
+    }
+    let messages: [Message]
+    let hasMore: Bool
+}
+
 struct ChatMessageItem: Identifiable {
     let id = UUID()
     let role: String  // "user" | "assistant"
@@ -10,6 +20,11 @@ struct ChatView: View {
     @State private var messages: [ChatMessageItem] = []
     @State private var draft: String = ""
     @State private var streaming: Bool = false
+    @State private var loadingHistory = true
+    @State private var hasMore = false
+    @State private var loadingMore = false
+    /// Timestamp of the oldest message held, and the cursor for paging back.
+    @State private var oldest: Date?
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -19,7 +34,18 @@ struct ChatView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 20) {
-                            if messages.isEmpty { starters }
+                            if hasMore {
+                                Button {
+                                    Task { await loadMore() }
+                                } label: {
+                                    Text(loadingMore ? "Loading…" : "Earlier messages")
+                                        .font(Theme.Font.caption)
+                                        .foregroundStyle(Theme.Palette.textDim)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .disabled(loadingMore)
+                            }
+                            if messages.isEmpty && !loadingHistory { starters }
                             ForEach(messages) { msg in
                                 MessageBlock(message: msg).id(msg.id)
                             }
@@ -49,6 +75,7 @@ struct ChatView: View {
         // gesture and no button that put it away.
         .contentShape(Rectangle())
         .onTapGesture { inputFocused = false }
+        .task { await loadHistory() }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -57,6 +84,48 @@ struct ChatView: View {
                     .tint(Theme.Palette.accent)
             }
         }
+    }
+
+    /// Load the transcript on open.
+    ///
+    /// Every message has been stored since chat existed; the app just never
+    /// asked, so leaving the tab looked like the conversation had been thrown
+    /// away.
+    private func loadHistory() async {
+        defer { loadingHistory = false }
+        guard let page = try? await fetch(before: nil) else { return }
+        messages = page.messages.map {
+            ChatMessageItem(role: $0.role, content: $0.content)
+        }
+        hasMore = page.hasMore
+        oldest = page.messages.first?.createdAt
+    }
+
+    private func loadMore() async {
+        guard let before = oldest, !loadingMore else { return }
+        loadingMore = true
+        defer { loadingMore = false }
+        guard let page = try? await fetch(before: before) else { return }
+        // Prepended, so the scroll position stays on what the reader was
+        // looking at rather than jumping to the top.
+        messages.insert(
+            contentsOf: page.messages.map {
+                ChatMessageItem(role: $0.role, content: $0.content)
+            },
+            at: 0
+        )
+        hasMore = page.hasMore
+        oldest = page.messages.first?.createdAt ?? oldest
+    }
+
+    private func fetch(before: Date?) async throws -> HistoryPage {
+        var path = "/v1/chat/history?limit=40"
+        if let before {
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            path += "&before=\(iso.string(from: before))"
+        }
+        return try await APIClient.shared.get(path)
     }
 
     private var header: some View {
