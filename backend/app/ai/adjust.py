@@ -35,6 +35,16 @@ class NoSessionToday(RuntimeError):
     """No brief exists for today, so there is nothing to adjust."""
 
 
+class UnreadableReply(RuntimeError):
+    """The model answered with something that is not the JSON we asked for.
+
+    It happens: a request that lands near a guardrail sometimes gets a plain
+    prose refusal instead of a structured one. That is a bad reply, not a
+    server fault, and the athlete should be told to rephrase rather than shown
+    a 500.
+    """
+
+
 @dataclass
 class AdjustResult:
     reply: str
@@ -111,7 +121,16 @@ def adjust_session(db: Session, user: User, message: str) -> AdjustResult:
     raw = "".join(b.text for b in resp.content if b.type == "text").strip()
     if raw.startswith("```"):
         raw = raw.strip("`").lstrip("json").strip()
-    parsed = json.loads(raw)
+    try:
+        parsed = json.loads(raw)
+    except ValueError as e:
+        # Logged in full: the only way to see which requests push the model off
+        # JSON is to keep the reply that did it.
+        log.error("adjust: unparseable reply for user %s — %r", user.id, raw[:400])
+        raise UnreadableReply("could not read the reply") from e
+    if not isinstance(parsed, dict):
+        log.error("adjust: reply was not an object for user %s — %r", user.id, raw[:200])
+        raise UnreadableReply("reply was not an object")
 
     reply = str(parsed.get("reply") or "").strip()
     changed = bool(parsed.get("changed"))

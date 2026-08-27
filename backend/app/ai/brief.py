@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 
 import anthropic
@@ -13,6 +14,12 @@ from app.ai.prompts import SYSTEM_PROMPT, user_context_block
 from app.config import settings
 from app.dates import today_for
 from app.models import DailyBrief, User
+
+log = logging.getLogger(__name__)
+
+
+class BriefUnavailable(RuntimeError):
+    """The model did not return a usable brief."""
 
 
 def generate_daily_brief(db: Session, user: User, day: date | None = None) -> DailyBrief:
@@ -85,7 +92,15 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
     raw = "".join(block.text for block in resp.content if block.type == "text").strip()
     if raw.startswith("```"):
         raw = raw.strip("`").lstrip("json").strip()
-    parsed = json.loads(raw)
+    try:
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            raise ValueError("not an object")
+    except ValueError as e:
+        # This runs unattended at 6am, so a bad reply must be visible in the log
+        # rather than only in an empty Today tab hours later.
+        log.error("brief: unparseable reply for user %s — %r", user.id, raw[:400])
+        raise BriefUnavailable("the coach did not return a usable brief") from e
 
     brief = (
         db.query(DailyBrief)

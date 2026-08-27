@@ -21,6 +21,21 @@ from app.models import (
 )
 
 
+def _local(dt: datetime | None, tz) -> str | None:
+    """A timestamp in the athlete's own clock.
+
+    Serialising UTC to the model made it reason in the wrong frame: a session
+    finished at 10pm on Tuesday in Boston is 02:00 Wednesday in UTC, and the
+    coach quite correctly described it as "early this morning" — correct for the
+    timestamp, wrong for the person reading it.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(tz).isoformat()
+
+
 def gather_recent(db: Session, user: User, days: int = 14) -> dict[str, Any]:
     """Everything the coach reads, with the empty parts left out.
 
@@ -30,7 +45,32 @@ def gather_recent(db: Session, user: User, days: int = 14) -> dict[str, Any]:
     daily complaint about equipment the athlete does not own. What is absent
     should simply be absent.
     """
-    return _drop_empty(_gather(db, user, days))
+    from app.dates import zone_for
+
+    tz = zone_for(user)
+    snap = _gather(db, user, days)
+    snap["now"] = datetime.now(tz).isoformat()
+    # Stated outright as well as applied, so the model has no reason to reach
+    # for UTC when describing when something happened.
+    snap["timezone"] = str(tz)
+    snap["note"] = "All times are the athlete's local time."
+
+    for w in snap.get("workouts", []):
+        w["started_at"] = _local(w["_started_at"], tz)
+        del w["_started_at"]
+    for h in snap.get("hrv", []):
+        h["measured_at"] = _local(h["_measured_at"], tz)
+        del h["_measured_at"]
+    for b in snap.get("body_metrics", []):
+        b["measured_at"] = _local(b["_measured_at"], tz)
+        del b["_measured_at"]
+    for r in snap.get("resting_hr_recent", []):
+        r["measured_at"] = _local(r["_measured_at"], tz)
+        del r["_measured_at"]
+    for sl in snap.get("sleep", []):
+        sl["date"] = _local(sl["_started_at"], tz)[:10]
+        del sl["_started_at"]
+    return _drop_empty(snap)
 
 
 def _drop_empty(snap: dict[str, Any]) -> dict[str, Any]:
@@ -141,7 +181,7 @@ def _workout(w: Workout) -> dict:
         "id": str(w.id),
         "source": w.source,
         "sport": w.sport,
-        "started_at": w.started_at.isoformat(),
+        "_started_at": w.started_at,
         "duration_min": round(w.duration_s / 60, 1),
         "distance_km": round(w.distance_m / 1000, 2) if w.distance_m else None,
         "avg_hr": w.avg_hr,
@@ -155,7 +195,7 @@ def _sleep(s: SleepSession) -> dict:
     return {
         "id": str(s.id),
         "source": s.source,
-        "date": s.started_at.date().isoformat(),
+        "_started_at": s.started_at,
         "total_min": round(total / 60, 1) if total else None,
         "deep_min": round(s.deep_s / 60, 1) if s.deep_s else None,
         "rem_min": round(s.rem_s / 60, 1) if s.rem_s else None,
@@ -166,7 +206,7 @@ def _sleep(s: SleepSession) -> dict:
 def _hrv(h: HRVReading) -> dict:
     return {
         "source": h.source,
-        "measured_at": h.measured_at.isoformat(),
+        "_measured_at": h.measured_at,
         "rmssd_ms": h.rmssd_ms,
         "sdnn_ms": h.sdnn_ms,
     }
@@ -181,7 +221,7 @@ def _body(b: BodyMetric) -> dict:
         "source": b.source,
         "metric": b.metric,
         "value": b.value,
-        "measured_at": b.measured_at.isoformat(),
+        "_measured_at": b.measured_at,
     }
 
 
@@ -196,7 +236,7 @@ def _resting_hr(db: Session, user: User, cutoff: datetime) -> list[dict]:
         .order_by(HeartRateSample.measured_at.desc())
         .limit(50)
     ).scalars()
-    return [{"measured_at": r.measured_at.isoformat(), "bpm": r.bpm} for r in rows]
+    return [{"_measured_at": r.measured_at, "bpm": r.bpm} for r in rows]
 
 
 def _goal(db: Session, user: User) -> dict | None:

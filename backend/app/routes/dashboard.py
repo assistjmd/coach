@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.ai.brief import generate_daily_brief
-from app.ai.adjust import NoSessionToday, adjust_session
+from app.ai.adjust import NoSessionToday, UnreadableReply, adjust_session
 from app.analytics.consistency import consistency
 from app.auth.deps import current_user
 from app.entitlement import require as paid
@@ -160,6 +160,14 @@ def adjust_today(
     except NoSessionToday:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, "no session today to change"
+        ) from None
+    except UnreadableReply:
+        # A bad reply, not a server fault. 502 rather than 500 so it is not
+        # confused with a bug in our own code, and the message tells the athlete
+        # the one thing that helps: try again.
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "I couldn't work that one out. Try saying it another way.",
         ) from None
 
     db.add(ChatMessage(user_id=user.id, role="assistant", content=result.reply, kind="adjust"))
