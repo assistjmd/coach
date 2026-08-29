@@ -62,5 +62,12 @@ class DailyBrief(Base):
         DateTime(timezone=True), nullable=True
     )
     adjustment_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Whether last night's sleep had arrived when this was written. False means
+    # the brief was produced on a deadline without it, and the day's readiness
+    # rests on older data — which is what lets a late sync trigger exactly one
+    # regeneration rather than none or an unbounded number.
+    had_overnight_sleep: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     model: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

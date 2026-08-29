@@ -9,14 +9,26 @@ from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.ai.brief import generate_daily_brief
+from app.analytics.overnight import last_night_arrived
 from app.db import SessionLocal
 from app.models import DailyBrief, User
 
 log = logging.getLogger("coach.brief")
 
-# Local hour at which someone's brief should be waiting for them. Early enough
-# to read before training, late enough that the night's sleep has synced.
+# Local hour from which a brief may be written. The earliest anyone wants it.
 TARGET_LOCAL_HOUR = 6
+
+# And the hour by which one is written regardless.
+#
+# Between these two the job waits for last night's sleep to arrive rather than
+# guessing. It frequently has not synced at 6am — Apple Health receives it when
+# the watch syncs, and we receive it when the app next opens — and a brief built
+# without it silently uses the night *before* last, which is worse than no
+# readiness at all because it looks correct.
+#
+# The deadline exists because plenty of people do not track sleep, and waiting
+# forever would mean they never get a brief.
+DEADLINE_LOCAL_HOUR = 11
 
 
 def run_for_all_users(now: datetime | None = None) -> None:
@@ -32,7 +44,8 @@ def run_for_all_users(now: datetime | None = None) -> None:
         users = db.query(User).all()
         for u in users:
             try:
-                if not _is_target_hour(u, now):
+                local_hour = now.astimezone(_zone(u)).hour
+                if not TARGET_LOCAL_HOUR <= local_hour <= DEADLINE_LOCAL_HOUR:
                     continue
                 local_day = now.astimezone(_zone(u)).date()
                 # Skip anyone who already has today's brief. The hourly cadence
@@ -45,8 +58,24 @@ def run_for_all_users(now: datetime | None = None) -> None:
                 )
                 if exists:
                     continue
-                generate_daily_brief(db, u, day=local_day)
-                log.info("brief generated for user %s (%s)", u.id, local_day)
+
+                slept = last_night_arrived(db, u, now)
+                if not slept and local_hour < DEADLINE_LOCAL_HOUR:
+                    # Try again next hour. Nothing is written, so a later run
+                    # produces the brief with the night included.
+                    log.info(
+                        "waiting for last night's sleep, user %s (%s, %02d:00)",
+                        u.id, local_day, local_hour,
+                    )
+                    continue
+
+                brief = generate_daily_brief(db, u, day=local_day)
+                brief.had_overnight_sleep = slept
+                db.commit()
+                log.info(
+                    "brief generated for user %s (%s, overnight_sleep=%s)",
+                    u.id, local_day, slept,
+                )
             except Exception:
                 log.exception("daily brief failed for user %s", u.id)
 
@@ -62,7 +91,38 @@ def _zone(user: User) -> ZoneInfo:
 
 
 def _is_target_hour(user: User, now: datetime) -> bool:
+    """Kept for the tests that predate the waiting window."""
     return now.astimezone(_zone(user)).hour == TARGET_LOCAL_HOUR
+
+
+def regenerate_if_sleep_landed(db, user: User) -> bool:
+    """Rewrite today's brief once, if it was written without last night's sleep.
+
+    Called after a sleep ingest. Someone who opens the app at 8am, having been
+    given a deadline-free brief at 6am that waited and gave up, should not spend
+    the day looking at readiness computed from the wrong night.
+
+    Bounded by the flag itself: once a brief has the night, it is never
+    regenerated again, so a chatty sync cannot spend tokens in a loop.
+    """
+    from app.dates import today_for
+
+    day = today_for(user)
+    brief = (
+        db.query(DailyBrief)
+        .filter(DailyBrief.user_id == user.id, DailyBrief.day == day)
+        .one_or_none()
+    )
+    if brief is None or brief.had_overnight_sleep:
+        return False
+    if not last_night_arrived(db, user):
+        return False
+
+    generate_daily_brief(db, user, day=day)
+    brief.had_overnight_sleep = True
+    db.commit()
+    log.info("brief regenerated with last night's sleep for user %s (%s)", user.id, day)
+    return True
 
 
 def run_for_user(user_id: uuid.UUID) -> None:

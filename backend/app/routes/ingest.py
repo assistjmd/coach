@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -14,6 +15,7 @@ from app.analytics.dedupe import (
 )
 from app.analytics.sleep_repair import combine, clamp_to_window, collapse_nights
 from app.auth.deps import current_user
+from app.jobs.daily_brief import regenerate_if_sleep_landed
 from app.db import get_db
 from app.models import (
     BodyMetric,
@@ -23,6 +25,8 @@ from app.models import (
     User,
     Workout,
 )
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/ingest", tags=["ingest"])
 
@@ -175,6 +179,18 @@ def ingest_healthkit(
         ),
     )
     db.commit()
+
+    # A brief written on the deadline without last night's sleep is rewritten
+    # once, now that it has arrived. Cheap to check and it stops someone who
+    # opens the app at 8am from reading a day built on the wrong night.
+    if batch.sleep:
+        try:
+            regenerate_if_sleep_landed(db, user)
+        except Exception:
+            # Ingest succeeded; the brief is a bonus. Failing the upload because
+            # a model call went wrong would lose the health data too.
+            log.exception("brief regeneration failed for user %s", user.id)
+
     return written
 
 
