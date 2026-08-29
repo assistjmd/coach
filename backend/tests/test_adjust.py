@@ -274,3 +274,36 @@ def test_the_headline_helper_matches_the_apps_rules():
     ) == "Second short night in a row and your HRV took a 12% hit."
     # No terminator at all is returned whole rather than truncated.
     assert headline("Easy day") == "Easy day"
+
+
+class TestTheGuardrailsDoNotBlockNormalRequests:
+    """Nine real requests produced one applied change. The model was not
+    failing — it was obeying a rule that told it to refuse the most common ask
+    there is, which was "add strength training to today"."""
+
+    def test_adding_work_is_not_forbidden(self):
+        from app.ai.prompts import ADJUST_PROMPT
+
+        # The rule that caused it, gone.
+        assert "belongs tomorrow" not in ADJUST_PROMPT
+        assert "a fifth more" not in ADJUST_PROMPT
+        # And replaced with the opposite default.
+        assert "Start from the assumption that you are going to do it" in ADJUST_PROMPT
+        assert "Adding work is a normal request" in ADJUST_PROMPT
+
+    def test_telling_the_coach_what_you_did_is_handled(self):
+        """"I already surfed" is news, not a request for a different session,
+        and was being answered as though it were an argument to win."""
+        from app.ai.prompts import ADJUST_PROMPT
+
+        assert "WHEN THEY TELL YOU WHAT THEY DID" in ADJUST_PROMPT
+        assert "Rebuild the day around it" in ADJUST_PROMPT
+
+    def test_the_safety_rules_survived_the_rewrite(self):
+        """Relaxing the volume rule must not have taken the real limits with
+        it. A rest day is still a rest day, and pain still goes to a clinician."""
+        from app.ai.prompts import ADJUST_PROMPT
+
+        assert "it stays a rest day" in ADJUST_PROMPT
+        assert "get it looked at" in ADJUST_PROMPT
+        assert "readiness is genuinely poor" in ADJUST_PROMPT

@@ -94,12 +94,21 @@ struct AdjustSheet: View {
     private func response(_ text: String) -> some View {
         Panel(accent: changed ? Theme.Palette.accent : nil) {
             VStack(alignment: .leading, spacing: 8) {
-                SectionLabel("Will")
+                SectionLabel(changed ? "Session updated" : "Will")
                 Text(text)
                     .font(Theme.Font.headline(17))
                     .lineSpacing(4)
                     .foregroundStyle(Theme.Palette.text)
                     .fixedSize(horizontal: false, vertical: true)
+                if !changed {
+                    // Said outright. Will answering without changing anything
+                    // and the request having silently failed look identical
+                    // otherwise, and people waited expecting the session to
+                    // move.
+                    Text("Your session is unchanged.")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Palette.textDim)
+                }
             }
         }
     }
