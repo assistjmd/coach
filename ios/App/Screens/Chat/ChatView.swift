@@ -263,10 +263,12 @@ private struct MessageBlock: View {
             }
             .fixedSize(horizontal: false, vertical: true)
         } else {
-            VStack(alignment: .leading, spacing: 8) {
-                SectionLabel("Will")
+            // The mark replaces the "Will" label. In a transcript the label
+            // repeats on every reply, which reads as a chat app naming its bot;
+            // the signature says the same thing without the word.
+            WillSays {
                 Text(message.content)
-                    .font(.system(size: 17, weight: .regular))
+                    .font(Theme.Font.headline(17))
                     .lineSpacing(4)
                     .foregroundStyle(Theme.Palette.text)
                     .textSelection(.enabled)

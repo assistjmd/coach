@@ -95,11 +95,13 @@ struct AdjustSheet: View {
         Panel(accent: changed ? Theme.Palette.accent : nil) {
             VStack(alignment: .leading, spacing: 8) {
                 SectionLabel(changed ? "Session updated" : "Will")
-                Text(text)
-                    .font(Theme.Font.headline(17))
-                    .lineSpacing(4)
-                    .foregroundStyle(Theme.Palette.text)
-                    .fixedSize(horizontal: false, vertical: true)
+                WillSays {
+                    Text(text)
+                        .font(Theme.Font.headline(17))
+                        .lineSpacing(4)
+                        .foregroundStyle(Theme.Palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if !changed {
                     // Said outright. Will answering without changing anything
                     // and the request having silently failed look identical

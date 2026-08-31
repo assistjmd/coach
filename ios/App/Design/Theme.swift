@@ -254,6 +254,51 @@ struct ConsistencyCard: View {
     }
 }
 
+/// Will's signature.
+///
+/// Not an avatar and not a badge. A 270° arc — the readiness ring's own
+/// geometry shrunk — placed beside anything the coach wrote, so its voice is
+/// distinguishable from the app's own chrome at a glance.
+///
+/// A face or a name would push this toward the assistant framing the whole
+/// product avoids. A shape the app already owns says "this is Will" without
+/// saying "this is a bot".
+struct WillMark: View {
+    var size: CGFloat = 14
+
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: 0.75)
+            .stroke(
+                Theme.Palette.accent,
+                style: StrokeStyle(lineWidth: size * 0.16, lineCap: .round)
+            )
+            .rotationEffect(.degrees(-90))
+            .frame(width: size, height: size)
+            // Decorative: the prose beside it is the content, and a screen
+            // reader announcing "image" before every line the coach says would
+            // be noise.
+            .accessibilityHidden(true)
+    }
+}
+
+/// Something Will said, with its signature.
+struct WillSays<Content: View>: View {
+    var spacing: CGFloat = 12
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: spacing) {
+            WillMark()
+                // Nudged to sit on the first line's baseline rather than above
+                // it, which reads as a bullet rather than a signature.
+                .offset(y: 1)
+            content()
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 /// One metric: name, value, optional delta against baseline.
 struct StatRow: View {
     let name: String

@@ -176,11 +176,14 @@ struct DashboardView: View {
                     // screen you glance at before you are properly awake, three
                     // lines of prose under the number is three lines nobody
                     // finishes.
-                    Text(Self.headline(b.readinessSummary))
-                        .font(Theme.Font.headline(20))
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(Theme.Palette.text)
-                        .fixedSize(horizontal: false, vertical: true)
+                    WillSays {
+                        Text(Self.headline(b.readinessSummary))
+                            .font(Theme.Font.headline(20))
+                            .multilineTextAlignment(.leading)
+                            .foregroundStyle(Theme.Palette.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 4)
                 }
                 .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
@@ -232,10 +235,12 @@ struct DashboardView: View {
                                 )
                         }
                     }
-                    Text(Self.headline(b.trainingPrescription))
-                        .font(Theme.Font.headline(19))
-                        .multilineTextAlignment(.leading)
-                        .foregroundStyle(Theme.Palette.text)
+                    WillSays {
+                        Text(Self.headline(b.trainingPrescription))
+                            .font(Theme.Font.headline(19))
+                            .multilineTextAlignment(.leading)
+                            .foregroundStyle(Theme.Palette.text)
+                    }
 
                     if !b.sessionItems.isEmpty {
                         // The primary action on the screen, sized like it.
