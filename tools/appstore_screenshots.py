@@ -22,7 +22,9 @@ from PIL import Image
 TARGET = (1284, 2778)
 # Theme.Palette.bg. Padding in anything else would show as a band.
 BG = (0x0B, 0x0B, 0x0D)
-OUT = pathlib.Path.home() / "Downloads" / "appstore-screenshots"
+# Written to a separate folder so a source directory can be re-run without
+# the converted files becoming the next run's input.
+OUT = pathlib.Path.home() / "Downloads" / "appstore-ready"
 
 
 def convert(path: pathlib.Path) -> pathlib.Path:

@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -6,6 +7,8 @@ from app.auth import apple, google
 from app.auth.jwt import issue_jwt
 from app.db import get_db
 from app.models import User
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
@@ -29,7 +32,14 @@ def sign_in_with_apple(body: AppleSignInBody, db: Session = Depends(get_db)) -> 
     try:
         claims = apple.verify_identity_token(body.identity_token)
     except Exception as e:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"apple verify failed: {e}") from e
+        # The reason goes to the log, not to the caller. This endpoint is
+        # unauthenticated, and echoing the exception hands an attacker a
+        # description of exactly how their forgery failed — which is how you
+        # iterate toward one that does not.
+        log.warning("apple sign-in rejected: %s", e)
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "that sign-in could not be verified"
+        ) from e
 
     sub = claims["sub"]
     email = claims.get("email")
@@ -51,7 +61,10 @@ def sign_in_with_google(body: GoogleSignInBody, db: Session = Depends(get_db)) -
     try:
         claims = google.verify_id_token(body.id_token)
     except Exception as e:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"google verify failed: {e}") from e
+        log.warning("google sign-in rejected: %s", e)
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "that sign-in could not be verified"
+        ) from e
 
     sub = claims["sub"]
     email = claims.get("email")
