@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, String, func
+from sqlalchemy import Date, DateTime, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,6 +36,10 @@ class User(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    # Local hour the athlete usually trains, asked once during onboarding. The
+    # fallback for the morning reminder when last night's sleep has not synced,
+    # which is most days for anyone without a watch.
+    usual_training_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Server-side rather than a client flag: a local flag would re-run onboarding
     # after a reinstall or on a second device, for a user who already has a goal.
     onboarded_at: Mapped[datetime | None] = mapped_column(

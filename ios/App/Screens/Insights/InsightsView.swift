@@ -25,6 +25,17 @@ struct SessionItem: Decodable, Identifiable {
 struct ItemActual: Codable {
     let sets: Int?
     let reps: Int?
+    /// Load lifted, where the athlete recorded one. Optional throughout: a run
+    /// has no weight, and plenty of people never log one.
+    let weight: Double?
+    let weightUnit: String?
+
+    init(sets: Int? = nil, reps: Int? = nil, weight: Double? = nil, weightUnit: String? = nil) {
+        self.sets = sets
+        self.reps = reps
+        self.weight = weight
+        self.weightUnit = weightUnit
+    }
 }
 
 struct DayEntry: Decodable, Identifiable {

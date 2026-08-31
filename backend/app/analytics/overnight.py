@@ -25,6 +25,45 @@ from app.models import SleepSession, User
 _MIN_NIGHT = timedelta(hours=2)
 
 
+def last_night_end(db: Session, user: User, now: datetime | None = None) -> datetime | None:
+    """When they woke, in their own clock, or None if the night has not synced.
+
+    The same window `last_night_arrived` uses, returning the moment rather than
+    the fact — the reminder wants to fire shortly after someone is actually
+    awake, not at a fixed hour that is dawn for one person and mid-morning for
+    another.
+    """
+    now = now or datetime.now(timezone.utc)
+    tz = zone_for(user)
+    today = local_day(now, tz)
+
+    latest = None
+    for row in _recent(db, user, now):
+        ended = _aware(row.ended_at)
+        if local_day(ended, tz) != today:
+            continue
+        if ended - _aware(row.started_at) < _MIN_NIGHT:
+            continue
+        if latest is None or ended > latest:
+            latest = ended
+    return latest.astimezone(tz) if latest else None
+
+
+def _aware(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _recent(db: Session, user: User, now: datetime):
+    return (
+        db.query(SleepSession)
+        .filter(
+            SleepSession.user_id == user.id,
+            SleepSession.ended_at >= now - timedelta(hours=36),
+        )
+        .all()
+    )
+
+
 def last_night_arrived(db: Session, user: User, now: datetime | None = None) -> bool:
     """Whether we hold a sleep session the athlete woke from today.
 

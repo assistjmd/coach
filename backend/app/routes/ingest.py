@@ -15,7 +15,11 @@ from app.analytics.dedupe import (
 )
 from app.analytics.sleep_repair import combine, clamp_to_window, collapse_nights
 from app.auth.deps import current_user
-from app.jobs.daily_brief import regenerate_if_sleep_landed
+from app.jobs.daily_brief import (
+    _MEANINGFUL_MINUTES,
+    refresh_after_activity,
+    regenerate_if_sleep_landed,
+)
 from app.db import get_db
 from app.models import (
     BodyMetric,
@@ -183,6 +187,14 @@ def ingest_healthkit(
     # A brief written on the deadline without last night's sleep is rewritten
     # once, now that it has arrived. Cheap to check and it stops someone who
     # opens the app at 8am from reading a day built on the wrong night.
+    # A workout long enough to matter makes the morning's headline wrong: it
+    # still says "get your run in" to someone who ran at lunchtime.
+    if any((w.duration_s or 0) >= _MEANINGFUL_MINUTES * 60 for w in batch.workouts):
+        try:
+            refresh_after_activity(db, user)
+        except Exception:
+            log.exception("brief refresh failed for user %s", user.id)
+
     if batch.sleep:
         try:
             regenerate_if_sleep_landed(db, user)

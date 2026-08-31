@@ -95,6 +95,44 @@ def _is_target_hour(user: User, now: datetime) -> bool:
     return now.astimezone(_zone(user)).hour == TARGET_LOCAL_HOUR
 
 
+# Rewrites allowed per day beyond the original. Enough for a morning sync, a
+# logged workout and a ticked session; short of anything that could run away.
+MAX_REVISIONS = 3
+
+# Below this, a workout is not worth rewriting the day around — it is a walk to
+# the shops, and the headline changing because of it reads as noise.
+_MEANINGFUL_MINUTES = 12
+
+
+def refresh_after_activity(db, user: User) -> bool:
+    """Rewrite today's brief when something happened that makes it stale.
+
+    The headline is written in the morning and then contradicted by the day:
+    it still says "get your run in" at 8pm to someone who ran at lunchtime. This
+    is called when a workout lands or a session is ticked off, so what the coach
+    says matches what the athlete did.
+
+    Bounded three ways, because every call costs money: a revision ceiling, a
+    minimum session length, and the requirement that a brief already exists.
+    """
+    from app.dates import today_for
+
+    day = today_for(user)
+    brief = (
+        db.query(DailyBrief)
+        .filter(DailyBrief.user_id == user.id, DailyBrief.day == day)
+        .one_or_none()
+    )
+    if brief is None or (brief.revision or 0) >= MAX_REVISIONS:
+        return False
+
+    generate_daily_brief(db, user, day=day)
+    brief.revision = (brief.revision or 0) + 1
+    db.commit()
+    log.info("brief refreshed for user %s (%s, revision %d)", user.id, day, brief.revision)
+    return True
+
+
 def regenerate_if_sleep_landed(db, user: User) -> bool:
     """Rewrite today's brief once, if it was written without last night's sleep.
 

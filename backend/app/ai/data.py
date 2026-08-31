@@ -7,8 +7,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.analytics.variety import summarise as summarise_variety
 from app.models import (
     BodyMetric,
+    ChatMessage,
     DailyBrief,
     DayLog,
     Goal,
@@ -110,7 +112,39 @@ def _gather(db: Session, user: User, days: int = 14) -> dict[str, Any]:
         "resting_hr_recent": _resting_hr(db, user, cutoff),
         "goal": _goal(db, user),
         "recent_sessions": _recent_sessions(db, user, days=10),
+        # Counted, not listed. The coach was given ten days of sessions and
+        # repeated itself for fourteen days anyway — a list is something it can
+        # read past, a count is not.
+        "variety_check": summarise_variety(db, user, days=14).as_dict(),
+        # What the athlete has actually said. They tell the coach things in chat
+        # — a sore knee, a trip next week, that they hate rowing — and none of it
+        # reached the brief, so the coach forgot everything between screens.
+        "athlete_said_recently": _recent_athlete_messages(db, user, days=7),
     }
+
+
+def _recent_athlete_messages(db: Session, user: User, days: int = 7) -> list[dict]:
+    """The athlete's own words from chat, newest last.
+
+    Their messages only. The coach's own replies are already reflected in what
+    it prescribed, and feeding them back doubles the context to restate what it
+    decided rather than what it was told.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = db.execute(
+        select(ChatMessage)
+        .where(
+            ChatMessage.user_id == user.id,
+            ChatMessage.role == "user",
+            ChatMessage.created_at >= cutoff,
+        )
+        .order_by(ChatMessage.created_at.desc())
+        .limit(25)
+    ).scalars().all()
+    return [
+        {"said": m.content[:400], "when": m.created_at, "context": m.kind}
+        for m in reversed(rows)
+    ]
 
 
 def _recent_sessions(db: Session, user: User, days: int = 10) -> list[dict]:

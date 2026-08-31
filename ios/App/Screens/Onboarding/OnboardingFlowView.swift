@@ -19,6 +19,10 @@ final class OnboardingModel: ObservableObject {
     }
 
     @Published var draft = GoalBody()
+    /// The hour they usually train, asked once here. It is what the morning
+    /// reminder falls back to on every day their sleep has not synced — which,
+    /// for anyone without a watch, is every day.
+    @Published var trainingHour: Int = 7
     @Published var path: [Step] = []
     @Published var isSaving = false
     @Published var error: String?
@@ -48,6 +52,11 @@ final class OnboardingModel: ObservableObject {
             let _: MeResponse = try await APIClient.shared.post(
                 "/v1/me/onboarding/complete",
                 body: ["timezone": TimeZone.current.identifier]
+            )
+            // Separate call, and a failure here is not worth blocking onboarding
+            // over: the reminder still works on its default without it.
+            let _: MeResponse? = try? await APIClient.shared.put(
+                "/v1/me/training-hour", body: ["usual_training_hour": trainingHour]
             )
             session.finishOnboarding()
         } catch {
@@ -144,6 +153,56 @@ private struct StepScaffold<Content: View, Footer: View>: View {
 
 // MARK: - Step 1: the goal
 
+/// When do you usually train?
+///
+/// One question, asked while they are already telling us how they train. It
+/// decides when the morning reminder fires on any day their sleep has not
+/// synced, which is most days for most people.
+private struct TrainingHourField: View {
+    @Binding var hour: Int
+
+    private let choices: [(Int, String)] = [
+        (6, "Early morning"), (9, "Morning"), (12, "Lunchtime"),
+        (17, "After work"), (20, "Evening"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionLabel("When do you usually train?")
+            VStack(spacing: 8) {
+                ForEach(choices, id: \.0) { value, label in
+                    Button { hour = value } label: {
+                        HStack {
+                            Text(label)
+                                .font(Theme.Font.body)
+                                .foregroundStyle(Theme.Palette.text)
+                            Spacer()
+                            if hour == value {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(Theme.Palette.accent)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(
+                            hour == value
+                                ? Theme.Palette.accent.opacity(0.12)
+                                : Theme.Palette.surface
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                }
+            }
+            Text("I'll have your brief ready before then.")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.Palette.textDim)
+        }
+    }
+}
+
 private struct GoalStep: View {
     @ObservedObject var model: OnboardingModel
     @FocusState private var notesFocused: Bool
@@ -185,6 +244,8 @@ private struct GoalStep: View {
                         }
                     }
                 }
+
+                TrainingHourField(hour: $model.trainingHour)
 
                 // Inline rather than its own screen — it only applies to one
                 // of the three focus options.

@@ -112,11 +112,15 @@ struct SessionSheet: View {
         defer { saving = false }
         // Only send entries that actually carry a number. An empty object would
         // otherwise be stored as "logged a change" when nothing was changed.
-        var payload: [String: [String: Int]] = [:]
+        var payload: [String: [String: Any]] = [:]
         for (id, actual) in actuals {
-            var fields: [String: Int] = [:]
+            var fields: [String: Any] = [:]
             if let s = actual.sets { fields["sets"] = s }
             if let r = actual.reps { fields["reps"] = r }
+            if let w = actual.weight {
+                fields["weight"] = w
+                fields["weight_unit"] = actual.weightUnit ?? ItemRow.defaultUnit
+            }
             if !fields.isEmpty { payload[id] = fields }
         }
         do {
@@ -134,6 +138,13 @@ struct SessionSheet: View {
 }
 
 // MARK: - Row
+
+private extension ItemRow {
+    /// Pounds or kilos, from the phone's own locale rather than asked for.
+    static var defaultUnit: String {
+        Locale.current.measurementSystem == .metric ? "kg" : "lb"
+    }
+}
 
 private struct ItemRow: View {
     let item: SessionItem
@@ -194,12 +205,32 @@ private struct ItemRow: View {
                     HStack(spacing: 22) {
                         if item.sets != nil {
                             Counter(label: "Sets", value: sets) { new in
-                                onActual(ItemActual(sets: new, reps: actual?.reps))
+                                onActual(ItemActual(
+                                    sets: new, reps: actual?.reps,
+                                    weight: actual?.weight, weightUnit: actual?.weightUnit
+                                ))
                             }
                         }
                         if item.reps != nil {
                             Counter(label: "Reps", value: reps) { new in
-                                onActual(ItemActual(sets: actual?.sets, reps: new))
+                                onActual(ItemActual(
+                                    sets: actual?.sets, reps: new,
+                                    weight: actual?.weight, weightUnit: actual?.weightUnit
+                                ))
+                            }
+                        }
+                        // Only where a load makes sense. A 20 minute easy run
+                        // has no weight, and a field asking for one invites a
+                        // number that means nothing.
+                        if item.sets != nil {
+                            WeightField(
+                                weight: actual?.weight,
+                                unit: actual?.weightUnit ?? Self.defaultUnit
+                            ) { value, unit in
+                                onActual(ItemActual(
+                                    sets: actual?.sets, reps: actual?.reps,
+                                    weight: value, weightUnit: unit
+                                ))
                             }
                         }
                         Spacer(minLength: 0)
@@ -289,5 +320,67 @@ private struct Counter: View {
                 .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
         }
         .buttonStyle(PressStyle())
+    }
+}
+
+/// Load for a lift, with the unit chosen from the phone's locale.
+///
+/// Free text rather than a stepper: weights jump in fives and tens and go to
+/// three figures, and tapping "+" forty times to record 185 is not logging, it
+/// is punishment.
+private struct WeightField: View {
+    let weight: Double?
+    let unit: String
+    let onChange: (Double?, String) -> Void
+
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("WEIGHT")
+                .font(Theme.Font.sectionLabel)
+                .tracking(1.2)
+                .foregroundStyle(Theme.Palette.textDim)
+            HStack(spacing: 6) {
+                TextField("—", text: $text)
+                    .keyboardType(.decimalPad)
+                    .focused($focused)
+                    .font(Theme.Font.stat(20))
+                    .foregroundStyle(Theme.Palette.text)
+                    .frame(width: 62)
+                    .multilineTextAlignment(.center)
+                    .padding(.vertical, 6)
+                    .background(Theme.Palette.surfaceHigh)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
+                    .onChange(of: focused) { _, isFocused in
+                        if !isFocused { commit() }
+                    }
+                Text(unit)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Palette.textDim)
+            }
+        }
+        .task {
+            // Seeded once. Rewriting it on every render would fight the
+            // keyboard while someone is mid-number.
+            if text.isEmpty, let weight {
+                text = weight == weight.rounded()
+                    ? String(Int(weight))
+                    : String(weight)
+            }
+        }
+    }
+
+    private func commit() {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            onChange(nil, unit)
+            return
+        }
+        // Anything unparseable is left alone rather than zeroed, which would
+        // silently destroy a number they meant to keep.
+        guard let value = Double(trimmed), value > 0, value < 2000 else { return }
+        onChange(value, unit)
     }
 }

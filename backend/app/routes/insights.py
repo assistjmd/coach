@@ -46,6 +46,12 @@ class ItemActual(BaseModel):
     """What was actually done, when it differed from the prescription."""
     sets: int | None = None
     reps: int | None = None
+    # Load, in whatever unit the athlete's device reports. Optional and often
+    # absent: a run has no weight, and plenty of people never log one. Stored
+    # so the next prescription can progress from a number they actually hit
+    # rather than guessing at it.
+    weight: float | None = None
+    weight_unit: str | None = None
 
 
 class DayEntry(BaseModel):

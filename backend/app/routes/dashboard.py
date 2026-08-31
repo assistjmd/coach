@@ -41,6 +41,8 @@ class SessionItem(BaseModel):
 class ItemActual(BaseModel):
     sets: int | None = None
     reps: int | None = None
+    weight: float | None = None
+    weight_unit: str | None = None
 
 
 class TodayBrief(BaseModel):

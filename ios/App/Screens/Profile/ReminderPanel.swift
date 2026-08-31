@@ -22,7 +22,7 @@ struct ReminderPanel: View {
             },
             set: { new in
                 let c = Calendar.current.dateComponents([.hour, .minute], from: new)
-                Task { await nudge.setTime(hour: c.hour ?? 6, minute: c.minute ?? 30) }
+                Task { await nudge.chooseTime(hour: c.hour ?? 6, minute: c.minute ?? 30) }
             }
         )
     }

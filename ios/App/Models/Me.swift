@@ -36,4 +36,9 @@ struct MeResponse: Decodable {
     /// reinstall or a second device doesn't re-run it.
     let onboarded: Bool
     let providers: [ProviderRow]
+    /// Local hour they said they usually train, and when they actually woke.
+    /// The second is null until last night's sleep syncs, which is why the
+    /// first exists.
+    let usualTrainingHour: Int?
+    let wokeAt: Date?
 }

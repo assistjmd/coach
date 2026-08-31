@@ -62,6 +62,11 @@ final class SessionStore: ObservableObject {
             Keychain.write(userIdKey, value: me.id)
             phase = me.onboarded ? .ready : .onboarding
             await syncTimezoneIfChanged(stored: me.timezone)
+            // Point the reminder at when this person is actually up, unless
+            // they have chosen a time themselves.
+            await MorningNudge.shared.alignToMorning(
+                wokeAt: me.wokeAt, usualTrainingHour: me.usualTrainingHour
+            )
         } catch APIError.http(401, _) {
             // The token is no longer good. Clear it rather than leaving the app
             // in a state where every request fails.

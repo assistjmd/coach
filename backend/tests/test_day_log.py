@@ -191,7 +191,11 @@ def test_logging_a_different_number_of_sets(client, db, user, auth):
         headers=auth,
     )
     assert resp.status_code == 200
-    assert resp.json()["item_actuals"]["main"] == {"sets": 4, "reps": 6}
+    logged = resp.json()["item_actuals"]["main"]
+    assert logged["sets"] == 4 and logged["reps"] == 6
+    # Weight is optional and absent here: a set logged without one must not
+    # become a set lifted at zero.
+    assert logged["weight"] is None
 
 
 def test_actuals_only_exist_where_something_differed(client, db, user, auth):
@@ -239,3 +243,53 @@ def test_today_carries_counts_and_actuals(client, db, user, auth):
     body = client.get("/v1/dashboard/today", headers=auth).json()
     assert body["session_items"][0]["sets"] == 3
     assert body["item_actuals"]["main"]["sets"] == 4
+
+
+def test_weight_is_stored_and_returned(client, auth, db, user):
+    """Load is what the next session progresses from. A number they actually hit
+    is the only starting point that is not a guess."""
+    from datetime import date
+
+    from app.models import DailyBrief
+
+    day = date.today()
+    db.add(DailyBrief(
+        user_id=user.id, day=day, model="m",
+        readiness_summary="x", training_prescription="y", session_planned=True,
+        session_items=[{"id": "squat", "text": "Back squat 3x8", "sets": 3, "reps": 8}],
+    ))
+    db.commit()
+
+    resp = client.put(
+        f"/v1/insights/day/{day}/log",
+        headers=auth,
+        json={"item_actuals": {"squat": {"sets": 3, "reps": 5, "weight": 185, "weight_unit": "lb"}}},
+    )
+    assert resp.status_code == 200
+    logged = resp.json()["item_actuals"]["squat"]
+    assert logged["weight"] == 185
+    assert logged["weight_unit"] == "lb"
+
+
+def test_a_weight_only_log_is_kept(client, auth, db, user):
+    """Someone who did the prescribed sets and reps but wants the load recorded
+    must not have the entry dropped as "nothing changed"."""
+    from datetime import date
+
+    from app.models import DailyBrief
+
+    day = date.today()
+    db.add(DailyBrief(
+        user_id=user.id, day=day, model="m",
+        readiness_summary="x", training_prescription="y", session_planned=True,
+        session_items=[{"id": "dl", "text": "Deadlift 3x5", "sets": 3, "reps": 5}],
+    ))
+    db.commit()
+
+    resp = client.put(
+        f"/v1/insights/day/{day}/log",
+        headers=auth,
+        json={"item_actuals": {"dl": {"weight": 225, "weight_unit": "lb"}}},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["item_actuals"]["dl"]["weight"] == 225

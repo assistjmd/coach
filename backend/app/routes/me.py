@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.auth.deps import current_user
@@ -45,6 +45,12 @@ class MeResponse(BaseModel):
     timezone: str
     onboarded: bool
     providers: list[ConnectedProvider]
+    # Local hour they said they usually train. Null until asked.
+    usual_training_hour: int | None = None
+    # When they actually woke, local, from last night's sleep. Null when it has
+    # not synced — which is why the hour above exists as a fallback rather than
+    # as the only answer.
+    woke_at: datetime | None = None
 
 
 class OnboardingComplete(BaseModel):
@@ -83,7 +89,34 @@ def _me(user: User, db: Session) -> MeResponse:
         timezone=user.timezone,
         onboarded=user.onboarded_at is not None,
         providers=providers,
+        usual_training_hour=user.usual_training_hour,
+        woke_at=_woke_at(db, user),
     )
+
+
+def _woke_at(db: Session, user: User) -> datetime | None:
+    """The end of last night's sleep, in the athlete's own clock."""
+    from app.analytics.overnight import last_night_end
+
+    return last_night_end(db, user)
+
+
+class TrainingHourBody(BaseModel):
+    # 0-23, or null to clear it. Validated rather than trusted: this drives a
+    # notification, and a bad value would schedule one at an hour nobody wants.
+    usual_training_hour: int | None = Field(default=None, ge=0, le=23)
+
+
+@router.put("/me/training-hour", response_model=MeResponse)
+def set_training_hour(
+    body: TrainingHourBody,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> MeResponse:
+    user.usual_training_hour = body.usual_training_hour
+    db.commit()
+    db.refresh(user)
+    return _me(user, db)
 
 
 class TimezoneBody(BaseModel):

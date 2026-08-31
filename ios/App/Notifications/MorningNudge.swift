@@ -39,6 +39,10 @@ final class MorningNudge: ObservableObject {
 
     private enum Key {
         static let enabled = "nudge.enabled"
+        /// Set once the athlete picks a time themselves, after which nothing
+        /// moves it. An app that quietly reschedules a reminder somebody chose
+        /// is an app they turn off.
+        static let timeChosen = "nudge.timeChosen"
         static let hour = "nudge.hour"
         static let minute = "nudge.minute"
     }
@@ -90,6 +94,37 @@ final class MorningNudge: ObservableObject {
         UNUserNotificationCenter.current().removePendingNotificationRequests(
             withIdentifiers: [Self.requestID] + Nudge.allCases.map(\.rawValue)
         )
+    }
+
+    /// Point the daily reminder at when this athlete is actually up.
+    ///
+    /// A fixed hour is dawn for one person and mid-morning for another. When
+    /// last night's sleep has synced we know when they woke and can fire
+    /// shortly after; when it has not — most days, for anyone without a watch —
+    /// the hour they told us at signup is the better guess than a global
+    /// default.
+    ///
+    /// Their explicitly chosen reminder time still wins over both. Someone who
+    /// set 6:30 meant 6:30.
+    func alignToMorning(wokeAt: Date?, usualTrainingHour: Int?) async {
+        guard enabled, !UserDefaults.standard.bool(forKey: Key.timeChosen) else { return }
+
+        var hour: Int?
+        var minute = 0
+        if let wokeAt {
+            let c = Calendar.current.dateComponents([.hour, .minute], from: wokeAt)
+            // Twenty minutes after waking: long enough to be upright, early
+            // enough to still shape the day.
+            let total = (c.hour ?? 6) * 60 + (c.minute ?? 0) + 20
+            hour = (total / 60) % 24
+            minute = total % 60
+        } else if let usualTrainingHour {
+            // An hour before they train, so there is time to act on it.
+            hour = max(0, usualTrainingHour - 1)
+        }
+
+        guard let hour, hour != self.hour || minute != self.minute else { return }
+        await setTime(hour: hour, minute: minute)
     }
 
     /// Re-arm the behaviour nudges from today's state.
@@ -173,6 +208,12 @@ final class MorningNudge: ObservableObject {
                 identifier: nudge.rawValue, content: content, trigger: trigger
             )
         )
+    }
+
+    /// Called when the athlete picks a time. Marks it as theirs.
+    func chooseTime(hour: Int, minute: Int) async {
+        UserDefaults.standard.set(true, forKey: Key.timeChosen)
+        await setTime(hour: hour, minute: minute)
     }
 
     func setTime(hour: Int, minute: Int) async {
