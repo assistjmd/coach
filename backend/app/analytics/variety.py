@@ -57,6 +57,12 @@ class Variety:
     most_repeated: str | None = None
     most_repeated_count: int = 0
     days_examined: int = 0
+    # Yesterday's session, verbatim, and how many days running it has been the
+    # same. Counting across a fortnight misses this entirely: a plan that
+    # alternates two sessions in four-day blocks spreads fine on paper and
+    # feels like Groundhog Day to the person doing it.
+    yesterdays_session: list[str] = field(default_factory=list)
+    consecutive_identical_days: int = 0
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -120,6 +126,28 @@ def summarise(db: Session, user: User, days: int = 14) -> Variety:
 
     trained = {p for p in _PATTERNS if p not in _INCIDENTAL}
     top = counts.most_common(1)
+
+    # `briefs` is newest-first. Walk it while the session is unchanged.
+    def signature(b) -> tuple[str, ...]:
+        return tuple(
+            _headline(i["text"])
+            for i in (b.session_items or [])
+            if isinstance(i, dict) and i.get("text")
+            and classify(i["text"]) not in _INCIDENTAL
+        )
+
+    run = 0
+    if briefs:
+        first = signature(briefs[0])
+        if first:
+            run = 1
+            for b in briefs[1:]:
+                if signature(b) == first:
+                    run += 1
+                else:
+                    break
+
+    previous = briefs[1] if len(briefs) > 1 else None
     return Variety(
         recently_prescribed=dict(counts.most_common(12)),
         days_since_pattern=last_seen,
@@ -127,4 +155,9 @@ def summarise(db: Session, user: User, days: int = 14) -> Variety:
         most_repeated=top[0][0] if top else None,
         most_repeated_count=top[0][1] if top else 0,
         days_examined=len(briefs),
+        yesterdays_session=[
+            i["text"] for i in ((previous.session_items or []) if previous else [])
+            if isinstance(i, dict) and i.get("text")
+        ],
+        consecutive_identical_days=run,
     )

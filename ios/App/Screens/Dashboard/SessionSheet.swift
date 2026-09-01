@@ -140,9 +140,18 @@ struct SessionSheet: View {
 // MARK: - Row
 
 private extension ItemRow {
-    /// Pounds or kilos, from the phone's own locale rather than asked for.
+    /// The unit last used, defaulting to pounds.
+    ///
+    /// Locale detection was deciding this and getting it wrong — a phone can be
+    /// set to a metric region by someone who has lifted in pounds their whole
+    /// life. Pounds is the better default for this app's users, and the unit is
+    /// tappable, so a wrong guess costs one tap rather than every entry.
     static var defaultUnit: String {
-        Locale.current.measurementSystem == .metric ? "kg" : "lb"
+        UserDefaults.standard.string(forKey: "weight.unit") ?? "lb"
+    }
+
+    static func rememberUnit(_ unit: String) {
+        UserDefaults.standard.set(unit, forKey: "weight.unit")
     }
 }
 
@@ -356,9 +365,20 @@ private struct WeightField: View {
                     .onChange(of: focused) { _, isFocused in
                         if !isFocused { commit() }
                     }
-                Text(unit)
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(Theme.Palette.textDim)
+                Button {
+                    let next = unit == "lb" ? "kg" : "lb"
+                    ItemRow.rememberUnit(next)
+                    onChange(Double(text.trimmingCharacters(in: .whitespaces)), next)
+                } label: {
+                    Text(unit)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Palette.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Theme.Palette.surfaceHigh)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
             }
         }
         .task {

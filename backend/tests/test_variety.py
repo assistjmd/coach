@@ -147,3 +147,73 @@ class TestAthleteMemory:
         ))
         db.commit()
         assert "ASSISTANT TEXT" not in str(gather_recent(db, user, days=14))
+
+
+class TestConsecutiveDays:
+    """Spreading work across a fortnight is not enough. A plan that repeats a
+    session on back-to-back days feels like nothing is happening, however varied
+    the month looks on paper — and the fortnight counter passes it cleanly."""
+
+    def test_a_run_of_identical_days_is_counted(self, db):
+        user = _user(db)
+        for i in range(1, 5):
+            _brief(db, user, i, ["Chin-up 4x5", "Dumbbell row 3x10"])
+        db.commit()
+
+        v = summarise(db, user, days=14)
+        assert v.consecutive_identical_days == 4
+
+    def test_the_run_stops_where_the_session_changed(self, db):
+        user = _user(db)
+        _brief(db, user, 1, ["Romanian deadlift 4x5"])
+        _brief(db, user, 2, ["Romanian deadlift 4x5"])
+        _brief(db, user, 3, ["Chin-up 4x5"])
+        _brief(db, user, 4, ["Chin-up 4x5"])
+        db.commit()
+
+        assert summarise(db, user, days=14).consecutive_identical_days == 2
+
+    def test_a_changed_load_is_still_a_different_session(self, db):
+        """4x5 to 4x8 on the same lift is progression, not repetition."""
+        user = _user(db)
+        _brief(db, user, 1, ["Back squat 4x8"])
+        _brief(db, user, 2, ["Back squat 4x5"])
+        db.commit()
+        # Same movement, so the headline matches — the coach is told the run
+        # length and decides whether progression justifies it.
+        assert summarise(db, user, days=14).consecutive_identical_days == 2
+
+    def test_warmups_do_not_make_two_days_look_alike(self, db):
+        user = _user(db)
+        _brief(db, user, 1, ["5 min easy walk", "Back squat 4x5"])
+        _brief(db, user, 2, ["5 min easy walk", "Easy run 30 min"])
+        db.commit()
+        assert summarise(db, user, days=14).consecutive_identical_days == 1
+
+    def test_yesterdays_session_is_handed_over_verbatim(self, db):
+        user = _user(db)
+        _brief(db, user, 1, ["Today's work"])
+        _brief(db, user, 2, ["Chin-up 4x5", "Dumbbell row 3x10"])
+        db.commit()
+
+        v = summarise(db, user, days=14)
+        assert v.yesterdays_session == ["Chin-up 4x5", "Dumbbell row 3x10"]
+
+    def test_it_reaches_the_model(self, db):
+        from app.ai.data import gather_recent
+
+        user = _user(db)
+        for i in range(1, 4):
+            _brief(db, user, i, ["Easy run 35 min"])
+        db.commit()
+
+        check = gather_recent(db, user, days=14)["variety_check"]
+        assert check["consecutive_identical_days"] == 3
+        assert check["yesterdays_session"] == ["Easy run 35 min"]
+
+    def test_the_prompt_names_the_two_valid_reasons_to_repeat(self):
+        from app.ai.prompts import SYSTEM_PROMPT
+
+        assert "They did not do it" in SYSTEM_PROMPT
+        assert "mid-progression on a main lift" in SYSTEM_PROMPT
+        assert "must break the pattern" in SYSTEM_PROMPT

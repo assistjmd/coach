@@ -79,7 +79,15 @@ class TestIngestTriggers:
 
 class TestWakeTime:
     def test_the_wake_moment_comes_back_in_local_time(self, db, user, client, auth):
-        end = NOW - timedelta(hours=2)
+        # Anchored to the athlete's own morning rather than "two hours ago".
+        # Run at 00:30 UTC, two hours ago is yesterday, and a sleep ending at
+        # 22:30 last night is an evening nap rather than a night — which the
+        # code is right to reject and the test was wrong to expect.
+        from app.dates import today_for, zone_for
+
+        tz = zone_for(user)
+        morning = datetime.combine(today_for(user), datetime.min.time(), tzinfo=tz)
+        end = morning + timedelta(hours=7)
         db.add(SleepSession(
             user_id=user.id, source="healthkit", source_record_id="n1",
             started_at=end - timedelta(hours=7), ended_at=end, light_s=20000,

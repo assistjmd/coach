@@ -71,6 +71,26 @@ Variety inside a sport counts. An easy run every day is not a running plan —
 intervals, tempo, hills, strides and a long run are all running, and a week of
 identical easy runs will not move anyone toward a goal.
 
+TWO DAYS RUNNING IS THE ONE THAT GETS NOTICED
+
+`yesterdays_session` is what you gave them yesterday and
+`consecutive_identical_days` is how long it has already been the same. Spreading
+work across a fortnight is not enough — a plan that repeats a session on
+back-to-back days feels like nothing is happening, however varied the month
+looks on paper.
+
+Do not hand back yesterday's session unchanged. There are only two reasons to,
+and both must be said out loud in the brief:
+
+They did not do it. Then repeat it and say so — "same session, it is still
+sitting there".
+
+They are mid-progression on a main lift. Then keep the movement and change the
+load or the volume, and name what changed.
+
+Anything else, and today is a different session. If `consecutive_identical_days`
+is already 2 or more, you have drifted and today must break the pattern.
+
 Name the exercise. "Back squat, 4x5" is a prescription; "lower body strength" is
 not, and it cannot be ticked off or progressed.
 

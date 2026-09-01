@@ -44,7 +44,8 @@ struct ConnectionsView: View {
                     }
                 }
                 .padding(.horizontal, Theme.Metric.gutter)
-                .padding(.bottom, 40)
+                // Clears the floating tab bar. 40 left the last source behind it.
+                .padding(.bottom, 110)
             }
             .refreshable { await load() }
         }
@@ -185,27 +186,9 @@ private struct ProviderRowView: View {
     @ViewBuilder
     private var status: some View {
         if p.isAnnounced {
-            if p.hasWorkaround {
-                // Reads as a button because it behaves like one. Grey caption
-                // text under a "SOON" chip looks like an apology, and nobody
-                // taps an apology.
-                HStack(spacing: 5) {
-                    Text("Connect it now")
-                        .font(.system(size: 14, weight: .semibold))
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 11, weight: .bold))
-                }
-                .foregroundStyle(Theme.Palette.accent)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(Theme.Palette.accent.opacity(0.14))
-                .clipShape(Capsule())
-                .padding(.top, 2)
-            } else {
-                Text("Coming soon")
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(Theme.Palette.textDim)
-            }
+            Text(p.hasWorkaround ? "Set it up through Apple Health" : "Coming soon")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.textDim)
         } else if p.slug == "healthkit" {
             healthKitStatus
         } else if let err = p.lastSyncError {
@@ -258,9 +241,13 @@ private struct ProviderRowView: View {
     @ViewBuilder
     private var actionControl: some View {
         if p.isAnnounced {
-            // No button. The row itself opens the how-to when there is one, and
-            // a disabled "Connect" invites a tap that does nothing.
-            EmptyView()
+            if p.hasWorkaround {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.accent)
+            } else {
+                EmptyView()
+            }
         } else if p.slug == "healthkit" {
             // The server reports HealthKit as "connected" for every user, since it
             // can't see the device's permission state. What it means locally is:
