@@ -217,3 +217,61 @@ class TestConsecutiveDays:
         assert "They did not do it" in SYSTEM_PROMPT
         assert "mid-progression on a main lift" in SYSTEM_PROMPT
         assert "must break the pattern" in SYSTEM_PROMPT
+
+
+class TestOverusedExercises:
+    """Alternating two session templates passes every other check and still
+    hands someone the same five exercises over and over. That is the version
+    people actually notice — standing in front of the same barbell again."""
+
+    def test_exercises_used_repeatedly_are_named(self, db):
+        user = _user(db)
+        # A push template and a pull template, alternating. No two consecutive
+        # days match, and the fortnight looks varied.
+        push = ["Barbell overhead press 3x8", "Incline dumbbell press 3x10", "Dips 3x10"]
+        pull = ["Chin-up 4x5", "Dumbbell row 3x10", "Face pull 3x15"]
+        for i in range(1, 11):
+            _brief(db, user, i, push if i % 2 else pull)
+        db.commit()
+
+        v = summarise(db, user, days=14)
+        assert v.consecutive_identical_days == 1, "no back-to-back repeats"
+        # And yet every exercise has been used five times.
+        assert len(v.overused) == 6
+        assert v.overused["barbell overhead press"] == 5
+        assert v.overused["chin-up"] == 5
+
+    def test_a_staple_used_twice_is_not_flagged(self, db):
+        """Three in a fortnight is a staple. It is the fourth that starts to
+        feel like the app ran out of ideas."""
+        user = _user(db)
+        _brief(db, user, 1, ["Back squat 4x5"])
+        _brief(db, user, 5, ["Back squat 4x5"])
+        db.commit()
+        assert summarise(db, user, days=14).overused == {}
+
+    def test_warmups_are_not_flagged_as_overuse(self, db):
+        user = _user(db)
+        for i in range(1, 8):
+            _brief(db, user, i, ["5 min easy walk", f"Exercise {i} 3x8"])
+        db.commit()
+        assert summarise(db, user, days=14).overused == {}
+
+    def test_it_reaches_the_model(self, db):
+        from app.ai.data import gather_recent
+
+        user = _user(db)
+        for i in range(1, 6):
+            _brief(db, user, i, ["Barbell overhead press 3x8"])
+        db.commit()
+
+        overused = gather_recent(db, user, days=14)["variety_check"]["overused"]
+        assert overused["barbell overhead press"] == 5
+
+    def test_the_prompt_requires_substituting_within_a_pattern(self):
+        from app.ai.prompts import SYSTEM_PROMPT
+
+        assert "off the table today" in SYSTEM_PROMPT
+        # Named alternatives, so "vary it" is a choice rather than an instruction.
+        assert "landmine press" in SYSTEM_PROMPT
+        assert "trap-bar" in SYSTEM_PROMPT

@@ -91,6 +91,22 @@ load or the volume, and name what changed.
 Anything else, and today is a different session. If `consecutive_identical_days`
 is already 2 or more, you have drifted and today must break the pattern.
 
+THE SAME EXERCISES INSIDE DIFFERENT SESSIONS
+
+`overused` lists every exercise you have reached for three or more times in the
+fortnight. Read it. Alternating two session templates passes every check above
+and still gives someone the same five exercises over and over — which is the
+version of this people actually notice, because they are standing in front of
+the same barbell doing the same lift again.
+
+Anything in `overused` is off the table today unless they are mid-progression on
+it and the load is moving. Pick a different exercise in the same pattern:
+a horizontal push is bench, floor press, dumbbell press, landmine press,
+push-up variations, dips; a hinge is conventional, Romanian, single-leg,
+trap-bar, hip thrust, good morning. There is no movement pattern with only one
+exercise in it, and reaching for the same one every time is a lack of
+imagination rather than a training decision.
+
 Name the exercise. "Back squat, 4x5" is a prescription; "lower body strength" is
 not, and it cannot be ticked off or progressed.
 

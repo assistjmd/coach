@@ -211,7 +211,7 @@ private struct ItemRow: View {
 
                 if countable {
                     Rectangle().fill(Theme.Palette.line).frame(height: 1)
-                    HStack(spacing: 22) {
+                    HStack(spacing: 10) {
                         if item.sets != nil {
                             Counter(label: "Sets", value: sets) { new in
                                 onActual(ItemActual(
@@ -242,7 +242,6 @@ private struct ItemRow: View {
                                 ))
                             }
                         }
-                        Spacer(minLength: 0)
                         if changed {
                             VStack(alignment: .trailing, spacing: 2) {
                                 Text("CHANGED")
@@ -276,17 +275,18 @@ private struct Counter: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(label.uppercased())
                 .font(Theme.Font.sectionLabel)
-                .tracking(1.2)
+                .tracking(0.8)
                 .foregroundStyle(Theme.Palette.textDim)
-            HStack(spacing: 8) {
+                .lineLimit(1)
+            HStack(spacing: 4) {
                 stepButton("−") { onChange(max(0, value - 1)) }
                 if editing {
                     TextField("", text: $text)
                         .keyboardType(.numberPad)
                         .focused($focused)
-                        .font(Theme.Font.stat(20))
+                        .font(Theme.Font.stat(19))
                         .foregroundStyle(Theme.Palette.text)
-                        .frame(width: 44)
+                        .frame(minWidth: 30)
                         .multilineTextAlignment(.center)
                         .onSubmit(commit)
                         .onChange(of: focused) { _, isFocused in
@@ -294,9 +294,9 @@ private struct Counter: View {
                         }
                 } else {
                     Text("\(value)")
-                        .font(Theme.Font.stat(20))
+                        .font(Theme.Font.stat(19))
                         .foregroundStyle(Theme.Palette.text)
-                        .frame(width: 44)
+                        .frame(minWidth: 30)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             text = "\(value)"
@@ -321,8 +321,10 @@ private struct Counter: View {
     private func stepButton(_ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(symbol)
-                .font(.system(size: 18, weight: .black))
-                .frame(width: 34, height: 34)
+                .font(.system(size: 17, weight: .black))
+                // 30 rather than 34: three groups plus a changed-marker have to
+                // share 400pt, and at the old size the row ran off both edges.
+                .frame(width: 30, height: 30)
                 .foregroundStyle(Theme.Palette.text)
                 .background(Theme.Palette.surfaceHigh)
                 .overlay(Rectangle().stroke(Theme.Palette.line, lineWidth: 1))
@@ -357,23 +359,25 @@ private struct WeightField: View {
                     .focused($focused)
                     .font(Theme.Font.stat(20))
                     .foregroundStyle(Theme.Palette.text)
-                    .frame(width: 62)
+                    .frame(minWidth: 44)
                     .multilineTextAlignment(.center)
                     .padding(.vertical, 6)
                     .background(Theme.Palette.surfaceHigh)
                     .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
-                    .onChange(of: focused) { _, isFocused in
-                        if !isFocused { commit() }
-                    }
+                    // On every keystroke, not on blur. Tapping Save with the
+                    // keyboard still up ran save() before the field ever lost
+                    // focus, so a typed weight was read back as nil and the
+                    // number silently vanished.
+                    .onChange(of: text) { _, _ in commit() }
                 Button {
                     let next = unit == "lb" ? "kg" : "lb"
                     ItemRow.rememberUnit(next)
-                    onChange(Double(text.trimmingCharacters(in: .whitespaces)), next)
+                    onChange(parsed(), next)
                 } label: {
                     Text(unit)
-                        .font(Theme.Font.caption)
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.Palette.accent)
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, 6)
                         .padding(.vertical, 4)
                         .background(Theme.Palette.surfaceHigh)
                         .clipShape(Capsule())
@@ -392,15 +396,25 @@ private struct WeightField: View {
         }
     }
 
+    /// The field's value, or nil when it is empty or nonsense.
+    ///
+    /// Bounded rather than merely parsed: a stray keypress turning 225 into
+    /// 2255 is a number the coach would then try to progress from.
+    private func parsed() -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let value = Double(trimmed), value > 0, value < 2000 else { return nil }
+        return value
+    }
+
     private func commit() {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
+            // Cleared on purpose. Distinct from unparseable, which is left
+            // alone so a half-typed "2" does not wipe an existing weight.
             onChange(nil, unit)
             return
         }
-        // Anything unparseable is left alone rather than zeroed, which would
-        // silently destroy a number they meant to keep.
-        guard let value = Double(trimmed), value > 0, value < 2000 else { return }
+        guard let value = parsed() else { return }
         onChange(value, unit)
     }
 }

@@ -45,6 +45,11 @@ _PATTERNS: dict[str, tuple[str, ...]] = {
 # Warm-ups and cool-downs repeat by design and are not the variety anyone means.
 _INCIDENTAL = ("walk", "mobility")
 
+# Uses of one exercise within the window before it counts as over-reached-for.
+# Three in a fortnight is a staple; it is the fourth that starts to feel like
+# the app has run out of ideas.
+_OVERUSED_AT = 3
+
 
 @dataclass
 class Variety:
@@ -63,6 +68,11 @@ class Variety:
     # feels like Groundhog Day to the person doing it.
     yesterdays_session: list[str] = field(default_factory=list)
     consecutive_identical_days: int = 0
+    # Exercises reached for repeatedly across the window, worst first. Naming
+    # only the single most-repeated one hid the real pattern: a coach cycling
+    # one push-day template will show five separate exercises at five uses
+    # each, and the top-one summary reports that as a single repetition.
+    overused: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -155,6 +165,7 @@ def summarise(db: Session, user: User, days: int = 14) -> Variety:
         most_repeated=top[0][0] if top else None,
         most_repeated_count=top[0][1] if top else 0,
         days_examined=len(briefs),
+        overused={k: v for k, v in counts.most_common() if v >= _OVERUSED_AT},
         yesterdays_session=[
             i["text"] for i in ((previous.session_items or []) if previous else [])
             if isinstance(i, dict) and i.get("text")
