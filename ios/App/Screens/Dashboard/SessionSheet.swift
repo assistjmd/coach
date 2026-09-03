@@ -64,8 +64,17 @@ struct SessionSheet: View {
                     }
                     .padding(.horizontal, Theme.Metric.gutter)
                     .padding(.bottom, 40)
+                    // Tapping anywhere off a field closes the keypad. The
+                    // toolbar button is the obvious route; this is the one that
+                    // still works if it fails to render.
+                    .contentShape(Rectangle())
+                    .onTapGesture { editing = nil }
                 }
-                .scrollDismissesKeyboard(.interactively)
+                // Immediately, not interactively. A partial interactive drag
+                // can leave the keyboard up with its accessory bar gone, and
+                // reaching a weight field on a long session means scrolling to
+                // it first.
+                .scrollDismissesKeyboard(.immediately)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -95,6 +104,11 @@ struct SessionSheet: View {
             }
         }
         .task {
+            // Cleared on every appearance. The sheet is dismissed from inside
+            // the adjust callback with another sheet still up, and focus
+            // restored from that leaves a field marked active with no keyboard
+            // and no accessory bar behind it.
+            editing = nil
             guard !loaded else { return }
             loaded = true
             ticked = Set(initialCompleted)
