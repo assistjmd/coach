@@ -293,3 +293,70 @@ def test_a_weight_only_log_is_kept(client, auth, db, user):
     )
     assert resp.status_code == 200
     assert resp.json()["item_actuals"]["dl"]["weight"] == 225
+
+
+def test_a_stored_weight_survives_a_round_trip(client, auth, db, user):
+    """The weight was reaching the database correctly all along — 225 lb was
+    sitting there — and the sheet was showing an empty field on reopen. This
+    pins the server half so a future display bug cannot be blamed on storage."""
+    from datetime import date
+
+    from app.models import DailyBrief
+
+    day = date.today()
+    db.add(DailyBrief(
+        user_id=user.id, day=day, model="m",
+        readiness_summary="x", training_prescription="y", session_planned=True,
+        session_items=[
+            {"id": "rdl", "text": "Romanian deadlift 4x8", "sets": 4, "reps": 8},
+            {"id": "thrust", "text": "Hip thrust 3x10", "sets": 3, "reps": 10},
+        ],
+    ))
+    db.commit()
+
+    client.put(f"/v1/insights/day/{day}/log", headers=auth, json={
+        "item_actuals": {
+            "rdl": {"weight": 225, "weight_unit": "lb"},
+            "thrust": {"sets": 3, "reps": 10, "weight": 220, "weight_unit": "lb"},
+        }
+    })
+
+    # Read back through the two surfaces the athlete actually reopens.
+    today = client.get("/v1/dashboard/today", headers=auth).json()
+    assert today["item_actuals"]["rdl"]["weight"] == 225
+    assert today["item_actuals"]["thrust"]["weight_unit"] == "lb"
+
+    cal = client.get(
+        f"/v1/insights/calendar?start={day}&end={day}", headers=auth
+    ).json()
+    entry = next(d for d in cal["days"] if d["day"] == day.isoformat())
+    assert entry["item_actuals"]["rdl"]["weight"] == 225
+
+
+def test_mixed_units_are_kept_per_exercise(client, auth, db, user):
+    """Someone logging a barbell in pounds and dumbbells in kilos is normal, and
+    coercing either would misreport what they lifted."""
+    from datetime import date
+
+    from app.models import DailyBrief
+
+    day = date.today()
+    db.add(DailyBrief(
+        user_id=user.id, day=day, model="m",
+        readiness_summary="x", training_prescription="y", session_planned=True,
+        session_items=[
+            {"id": "bar", "text": "Deadlift 3x5", "sets": 3, "reps": 5},
+            {"id": "db", "text": "Single-leg RDL 3x8", "sets": 3, "reps": 8},
+        ],
+    ))
+    db.commit()
+
+    r = client.put(f"/v1/insights/day/{day}/log", headers=auth, json={
+        "item_actuals": {
+            "bar": {"weight": 315, "weight_unit": "lb"},
+            "db": {"weight": 30, "weight_unit": "kg"},
+        }
+    })
+    actuals = r.json()["item_actuals"]
+    assert actuals["bar"]["weight_unit"] == "lb"
+    assert actuals["db"]["weight_unit"] == "kg"

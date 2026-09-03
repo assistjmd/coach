@@ -74,10 +74,18 @@ struct ProfileView: View {
         Panel {
             VStack(alignment: .leading, spacing: 20) {
                 field("Type") {
-                    Picker("", selection: $goal.kind) {
-                        ForEach(GoalKind.allCases) { Text($0.title).tag($0) }
+                    VStack(spacing: 8) {
+                        ForEach(GoalKind.allCases) { kind in
+                            SelectRow(
+                                title: kind.title,
+                                detail: kind.subtitle,
+                                selected: goal.kind == kind
+                            ) {
+                                goal.kind = kind
+                                if kind != .race { goal.targetDate = nil }
+                            }
+                        }
                     }
-                    .pickerStyle(.segmented)
                 }
 
                 field("Sport") {

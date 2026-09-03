@@ -25,6 +25,9 @@ struct SessionSheet: View {
     @State private var error: String?
     @State private var loaded = false
     @State private var adjusting = false
+    /// Which field is being edited, keyed by item id and kind. Held here rather
+    /// than inside each field so the keyboard toolbar can dismiss it.
+    @FocusState private var editing: String?
 
     var body: some View {
         NavigationStack {
@@ -37,6 +40,7 @@ struct SessionSheet: View {
                                 item: item,
                                 done: ticked.contains(item.id),
                                 actual: actuals[item.id],
+                                editing: $editing,
                                 onToggle: { toggle(item.id) },
                                 onActual: { actuals[item.id] = $0 }
                             )
@@ -66,6 +70,14 @@ struct SessionSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }.tint(Theme.Palette.textDim)
+                }
+                // decimalPad and numberPad have no return key, so without this
+                // the keyboard covers the Save button with no way to dismiss it.
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { editing = nil }
+                        .font(Theme.Font.button)
+                        .tint(Theme.Palette.accent)
                 }
             }
             .toolbarBackground(Theme.Palette.bg, for: .navigationBar)
@@ -159,6 +171,7 @@ private struct ItemRow: View {
     let item: SessionItem
     let done: Bool
     let actual: ItemActual?
+    @FocusState.Binding var editing: String?
     let onToggle: () -> Void
     let onActual: (ItemActual) -> Void
 
@@ -213,7 +226,10 @@ private struct ItemRow: View {
                     Rectangle().fill(Theme.Palette.line).frame(height: 1)
                     HStack(spacing: 10) {
                         if item.sets != nil {
-                            Counter(label: "Sets", value: sets) { new in
+                            Counter(
+                                label: "Sets", value: sets,
+                                fieldID: "\(item.id).sets", editing: $editing
+                            ) { new in
                                 onActual(ItemActual(
                                     sets: new, reps: actual?.reps,
                                     weight: actual?.weight, weightUnit: actual?.weightUnit
@@ -221,7 +237,10 @@ private struct ItemRow: View {
                             }
                         }
                         if item.reps != nil {
-                            Counter(label: "Reps", value: reps) { new in
+                            Counter(
+                                label: "Reps", value: reps,
+                                fieldID: "\(item.id).reps", editing: $editing
+                            ) { new in
                                 onActual(ItemActual(
                                     sets: actual?.sets, reps: new,
                                     weight: actual?.weight, weightUnit: actual?.weightUnit
@@ -234,7 +253,9 @@ private struct ItemRow: View {
                         if item.sets != nil {
                             WeightField(
                                 weight: actual?.weight,
-                                unit: actual?.weightUnit ?? Self.defaultUnit
+                                unit: actual?.weightUnit ?? Self.defaultUnit,
+                                fieldID: "\(item.id).weight",
+                                editing: $editing
                             ) { value, unit in
                                 onActual(ItemActual(
                                     sets: actual?.sets, reps: actual?.reps,
@@ -265,11 +286,14 @@ private struct ItemRow: View {
 private struct Counter: View {
     let label: String
     let value: Int
+    let fieldID: String
+    @FocusState.Binding var editing: String?
     let onChange: (Int) -> Void
 
-    @State private var editing = false
+    @State private var showingField = false
     @State private var text = ""
-    @FocusState private var focused: Bool
+
+    private var focused: Bool { editing == fieldID }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -280,17 +304,19 @@ private struct Counter: View {
                 .lineLimit(1)
             HStack(spacing: 4) {
                 stepButton("−") { onChange(max(0, value - 1)) }
-                if editing {
+                if showingField {
                     TextField("", text: $text)
                         .keyboardType(.numberPad)
-                        .focused($focused)
+                        .focused($editing, equals: fieldID)
                         .font(Theme.Font.stat(19))
                         .foregroundStyle(Theme.Palette.text)
                         .frame(minWidth: 30)
                         .multilineTextAlignment(.center)
                         .onSubmit(commit)
-                        .onChange(of: focused) { _, isFocused in
-                            if !isFocused { commit() }
+                        // numberPad has no return key either, so the sheet's
+                        // Done button clears `editing` and this notices.
+                        .onChange(of: editing) { _, current in
+                            if current != fieldID { commit() }
                         }
                 } else {
                     Text("\(value)")
@@ -300,8 +326,8 @@ private struct Counter: View {
                         .contentShape(Rectangle())
                         .onTapGesture {
                             text = "\(value)"
-                            editing = true
-                            focused = true
+                            showingField = true
+                            editing = fieldID
                         }
                 }
                 stepButton("+") { onChange(min(200, value + 1)) }
@@ -315,7 +341,7 @@ private struct Counter: View {
         if let parsed = Int(text), (0...200).contains(parsed) {
             onChange(parsed)
         }
-        editing = false
+        showingField = false
     }
 
     private func stepButton(_ symbol: String, action: @escaping () -> Void) -> some View {
@@ -342,10 +368,13 @@ private struct Counter: View {
 private struct WeightField: View {
     let weight: Double?
     let unit: String
+    let fieldID: String
+    @FocusState.Binding var editing: String?
     let onChange: (Double?, String) -> Void
 
     @State private var text = ""
-    @FocusState private var focused: Bool
+
+    private var focused: Bool { editing == fieldID }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -356,7 +385,7 @@ private struct WeightField: View {
             HStack(spacing: 6) {
                 TextField("—", text: $text)
                     .keyboardType(.decimalPad)
-                    .focused($focused)
+                    .focused($editing, equals: fieldID)
                     .font(Theme.Font.stat(20))
                     .foregroundStyle(Theme.Palette.text)
                     .frame(minWidth: 44)
@@ -385,15 +414,21 @@ private struct WeightField: View {
                 .buttonStyle(PressStyle())
             }
         }
-        .task {
-            // Seeded once. Rewriting it on every render would fight the
-            // keyboard while someone is mid-number.
-            if text.isEmpty, let weight {
-                text = weight == weight.rounded()
-                    ? String(Int(weight))
-                    : String(weight)
-            }
+        .task { syncFromStored() }
+        // The sheet populates its actuals after the first render, so a task
+        // that runs once sees nil and never corrects itself. Following the
+        // value instead — but never while the field has focus, or it would
+        // rewrite what someone is mid-way through typing.
+        .onChange(of: weight) { _, _ in syncFromStored() }
+    }
+
+    private func syncFromStored() {
+        guard !focused else { return }
+        guard let weight else {
+            text = ""
+            return
         }
+        text = weight == weight.rounded() ? String(Int(weight)) : String(weight)
     }
 
     /// The field's value, or nil when it is empty or nonsense.

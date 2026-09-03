@@ -382,3 +382,54 @@ extension Color {
         )
     }
 }
+
+/// One choice in a list of them, with room for an explanation.
+///
+/// Used wherever a segmented control would truncate. Three options reading
+/// "Just keep me...", "Train for a race", "Get faster or..." tell the athlete
+/// nothing and cannot be compared, which is the whole job of the control.
+struct SelectRow: View {
+    let title: String
+    let detail: String?
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.text)
+                    if let detail {
+                        Text(detail)
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.Palette.textDim)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+                Spacer(minLength: 8)
+                Rectangle()
+                    .fill(selected ? Theme.Palette.accent : Color.clear)
+                    .overlay(
+                        Rectangle().stroke(
+                            selected ? Theme.Palette.accent : Theme.Palette.line,
+                            lineWidth: 1.5
+                        )
+                    )
+                    .frame(width: 18, height: 18)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.Palette.surface)
+            .overlay(
+                Rectangle().stroke(
+                    selected ? Theme.Palette.accent : Theme.Palette.line,
+                    lineWidth: 1
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
+        }
+        .buttonStyle(PressStyle())
+    }
+}
