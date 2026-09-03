@@ -14,6 +14,7 @@ struct DashboardView: View {
     @State private var showingSession = false
     @State private var showingReadiness = false
     @State private var showingConsistency = false
+    @State private var showingPaywall = false
     @ObservedObject private var store = Store.shared
 
     enum LoadState: Equatable {
@@ -71,6 +72,9 @@ struct DashboardView: View {
                     actuals = updated.itemActuals
                 }
             }
+        }
+        .sheet(isPresented: $showingPaywall) {
+            NavigationStack { PaywallView() }
         }
         .sheet(isPresented: $showingReadiness) { ReadinessTrendSheet() }
         .sheet(isPresented: $showingConsistency) { ConsistencyDetailSheet() }
@@ -204,6 +208,31 @@ struct DashboardView: View {
             .opacity(appeared ? 1 : 0)
         }
 
+        // Only in the last few days, and only once enforcement is real. Someone
+        // who never opens the Goal tab would otherwise meet the paywall with no
+        // warning at all, which is how a trial ending reads as the app breaking.
+        if store.enforced, store.state == "trial", store.trialDaysLeft <= 3 {
+            Button { showingPaywall = true } label: {
+                Panel(accent: Theme.Palette.caution) {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(trialNotice)
+                                .font(Theme.Font.bodyStrong)
+                                .foregroundStyle(Theme.Palette.text)
+                            Text("Your history stays yours either way.")
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(Theme.Palette.textDim)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.caution)
+                    }
+                }
+            }
+            .buttonStyle(PressStyle())
+        }
+
         Button { showingConsistency = true } label: {
             ConsistencyCard(
                 score: b.consistency,
@@ -261,6 +290,14 @@ struct DashboardView: View {
         .offset(y: appeared ? 0 : 16)
         .opacity(appeared ? 1 : 0)
 
+    }
+
+    private var trialNotice: String {
+        switch store.trialDaysLeft {
+        case 0: return "Your trial ends today"
+        case 1: return "One day left in your trial"
+        default: return "\(store.trialDaysLeft) days left in your trial"
+        }
     }
 
     /// The first sentence of a paragraph.

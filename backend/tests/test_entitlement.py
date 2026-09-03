@@ -176,3 +176,39 @@ class TestAppleVerification:
 
         roots = _roots()
         assert len(roots) >= 3
+
+
+class TestTheTrialEndsWithWarning:
+    """Enforcement makes the difference between a trial ending and the app
+    appearing to break. The client needs enough to warn with."""
+
+    def test_days_left_counts_down_truthfully(self, db, user):
+        user.trial_ends_at = NOW + timedelta(days=2, hours=3)
+        db.commit()
+        e = evaluate(db, user)
+        assert e.state == "trial"
+        # Ceiling, so a trial with hours left never reads as zero days while
+        # access is genuinely still open.
+        assert e.trial_days_left == 3
+
+    def test_the_last_day_still_reads_as_a_day(self, db, user):
+        user.trial_ends_at = NOW + timedelta(hours=5)
+        db.commit()
+        assert evaluate(db, user).trial_days_left == 1
+
+    def test_the_status_endpoint_carries_what_the_banner_needs(self, client, auth, db, user):
+        user.trial_ends_at = NOW + timedelta(days=1, hours=2)
+        db.commit()
+        body = client.get("/v1/subscriptions/status", headers=auth).json()
+        assert body["state"] == "trial"
+        assert body["trial_days_left"] == 2
+        # Without this the client cannot tell a real deadline from a dry run.
+        assert "enforced" in body
+
+    def test_a_subscriber_is_never_warned(self, db, user):
+        user.trial_ends_at = NOW + timedelta(hours=1)
+        db.commit()
+        _sub(db, user)
+        e = evaluate(db, user)
+        assert e.state == "subscribed"
+        assert e.trial_days_left == 0, "no countdown for someone who already paid"

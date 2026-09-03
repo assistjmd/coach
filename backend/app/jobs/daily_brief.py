@@ -105,16 +105,20 @@ _MEANINGFUL_MINUTES = 12
 
 
 def refresh_after_activity(db, user: User) -> bool:
-    """Rewrite today's brief when something happened that makes it stale.
+    """Update what the coach *says* about today. Never what it asked for.
 
-    The headline is written in the morning and then contradicted by the day:
-    it still says "get your run in" at 8pm to someone who ran at lunchtime. This
-    is called when a workout lands or a session is ticked off, so what the coach
-    says matches what the athlete did.
+    This used to call `generate_daily_brief`, which rewrites `session_items`
+    wholesale — so a workout syncing at 9am replaced a shoulder-and-back day
+    with a leg day underneath someone half way through it, taking their ticked
+    items with it. The plan is not the headline: once the coach has asked for
+    something and the athlete has started, the only thing allowed to move is
+    the read. Changing the prescription is a separate act, and the athlete
+    already has a way to ask for it.
 
     Bounded three ways, because every call costs money: a revision ceiling, a
     minimum session length, and the requirement that a brief already exists.
     """
+    from app.ai.headline import HeadlineUnavailable, refresh_headline
     from app.dates import today_for
 
     day = today_for(user)
@@ -123,13 +127,29 @@ def refresh_after_activity(db, user: User) -> bool:
         .filter(DailyBrief.user_id == user.id, DailyBrief.day == day)
         .one_or_none()
     )
-    if brief is None or (brief.revision or 0) >= MAX_REVISIONS:
+    if brief is None:
+        return False
+    # Read from the database rather than a possibly stale instance: this runs
+    # once per ingest batch and a phone chunks its upload, so several land in a
+    # row and each must see what the last one wrote.
+    db.refresh(brief)
+    if (brief.revision or 0) >= MAX_REVISIONS:
         return False
 
-    generate_daily_brief(db, user, day=day)
+    before = brief.session_items
+    try:
+        changed = refresh_headline(db, user, brief)
+    except HeadlineUnavailable:
+        return False
+    if not changed:
+        return False
+
+    # Belt and braces. The session must be exactly what it was.
+    assert brief.session_items == before, "a headline refresh must not touch the plan"
+
     brief.revision = (brief.revision or 0) + 1
     db.commit()
-    log.info("brief refreshed for user %s (%s, revision %d)", user.id, day, brief.revision)
+    log.info("headline refreshed for user %s (%s, revision %d)", user.id, day, brief.revision)
     return True
 
 

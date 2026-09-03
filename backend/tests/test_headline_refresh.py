@@ -26,27 +26,31 @@ def _brief(db, user, revision=0):
     return b
 
 
-def test_a_logged_session_rewrites_the_day(db, user):
+def test_a_logged_session_updates_the_headline(db, user):
+    """A refresh moves the read, not the plan — see test_headline_only.py."""
     _brief(db, user)
-    with patch("app.jobs.daily_brief.generate_daily_brief") as gen:
+    from app.ai import headline as mod
+    with patch.object(mod, "refresh_headline", return_value=True) as fn:
         assert refresh_after_activity(db, user) is True
-        assert gen.call_count == 1
+        assert fn.call_count == 1
 
 
 def test_rewrites_are_capped(db, user):
     """The only thing between a true headline and a sync loop spending money
     all afternoon."""
     _brief(db, user)
-    with patch("app.jobs.daily_brief.generate_daily_brief") as gen:
+    from app.ai import headline as mod
+    with patch.object(mod, "refresh_headline", return_value=True) as fn:
         for _ in range(10):
             refresh_after_activity(db, user)
-        assert gen.call_count == MAX_REVISIONS
+        assert fn.call_count == MAX_REVISIONS
 
 
 def test_nothing_happens_without_a_brief(db, user):
-    with patch("app.jobs.daily_brief.generate_daily_brief") as gen:
+    from app.ai import headline as mod
+    with patch.object(mod, "refresh_headline", return_value=True) as fn:
         assert refresh_after_activity(db, user) is False
-        assert gen.call_count == 0
+        assert fn.call_count == 0
 
 
 class TestIngestTriggers:
@@ -58,9 +62,10 @@ class TestIngestTriggers:
             "ended_at": (NOW - timedelta(hours=1)).isoformat(),
             "duration_s": 3600,
         }]}
-        with patch("app.jobs.daily_brief.generate_daily_brief") as gen:
+        from app.ai import headline as mod
+        with patch.object(mod, "refresh_headline", return_value=True) as fn:
             assert client.post("/v1/ingest/healthkit", headers=auth, json=payload).status_code == 200
-            assert gen.call_count == 1
+            assert fn.call_count == 1
 
     def test_a_walk_to_the_shops_does_not(self, client, auth, db, user):
         """The headline changing because of an eight minute stroll reads as
@@ -72,9 +77,10 @@ class TestIngestTriggers:
             "ended_at": (NOW - timedelta(minutes=22)).isoformat(),
             "duration_s": 480,
         }]}
-        with patch("app.jobs.daily_brief.generate_daily_brief") as gen:
+        from app.ai import headline as mod
+        with patch.object(mod, "refresh_headline", return_value=True) as fn:
             assert client.post("/v1/ingest/healthkit", headers=auth, json=payload).status_code == 200
-            assert gen.call_count == 0
+            assert fn.call_count == 0
 
 
 class TestWakeTime:
