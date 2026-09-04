@@ -76,17 +76,10 @@ struct SessionSheet: View {
                 // it first.
                 .scrollDismissesKeyboard(.immediately)
             }
+            .safeAreaInset(edge: .bottom) { keypadBar }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }.tint(Theme.Palette.textDim)
-                }
-                // decimalPad and numberPad have no return key, so without this
-                // the keyboard covers the Save button with no way to dismiss it.
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") { editing = nil }
-                        .font(Theme.Font.button)
-                        .tint(Theme.Palette.accent)
                 }
             }
             .toolbarBackground(Theme.Palette.bg, for: .navigationBar)
@@ -113,6 +106,33 @@ struct SessionSheet: View {
             loaded = true
             ticked = Set(initialCompleted)
             actuals = initialActuals
+        }
+    }
+
+    /// The Done bar for the number keypads.
+    ///
+    /// Drawn rather than requested. `ToolbarItemGroup(placement: .keyboard)` is
+    /// unreliable inside a sheet — it went missing after editing a session and
+    /// reopening it — and neither immediate scroll dismissal nor clearing focus
+    /// on appearance fixed that, because the problem was never the focus state.
+    /// A safe-area inset sits above the keyboard, since keyboard avoidance
+    /// moves the safe area, and it appears because nothing else gets a say.
+    @ViewBuilder
+    private var keypadBar: some View {
+        if editing != nil {
+            HStack {
+                Spacer()
+                Button("Done") { editing = nil }
+                    .font(Theme.Font.button)
+                    .foregroundStyle(Theme.Palette.accent)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+            }
+            .background(.ultraThinMaterial)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Theme.Palette.line).frame(height: 0.5)
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
