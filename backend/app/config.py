@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     # Who may read aggregate product metrics. Empty closes the route entirely,
     # which is the right default for an environment nobody configured.
     admin_emails: str = ""
+
+    # Where health alerts go, and the Gmail app password they are sent with.
+    # Unset means the daily check still runs and logs but sends nothing, so a
+    # missing password degrades rather than taking the scheduler down.
+    alert_email_to: str = ""
+    alert_smtp_user: str = ""
+    alert_smtp_password: str = ""
     chat_max_output_tokens: int = 700
 
     oura_client_id: str = ""

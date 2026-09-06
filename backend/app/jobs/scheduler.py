@@ -9,6 +9,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.jobs.daily_brief import run_for_all_users
+from app.jobs.health_check import run as health_check
 from app.jobs.sync import sync_all
 
 log = logging.getLogger("coach.scheduler")
@@ -30,8 +31,17 @@ def start() -> BackgroundScheduler:
         id="daily_brief",
         max_instances=1,
     )
+    # 18:00 UTC — early afternoon in the US, evening in Europe, so every
+    # timezone is past its 11am brief deadline and a missing brief is a real
+    # failure rather than one that has simply not happened yet.
+    s.add_job(
+        health_check,
+        CronTrigger(hour=18, minute=0),
+        id="health_check",
+        max_instances=1,
+    )
     s.start()
-    log.info("scheduler started: sync every 30m, brief check hourly")
+    log.info("scheduler started: sync every 30m, brief check hourly, health check daily")
     _scheduler = s
     return s
 

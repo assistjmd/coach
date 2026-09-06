@@ -15,6 +15,10 @@ struct PaywallView: View {
     @ObservedObject private var store = Store.shared
     @Environment(\.dismiss) private var dismiss
     @State private var selected: String = Store.yearlyID
+    @State private var showingCode = false
+    @State private var code = ""
+    @State private var redeeming = false
+    @State private var redeemed: String?
 
     var body: some View {
         ScreenBackground {
@@ -24,6 +28,7 @@ struct PaywallView: View {
                     if !store.pitch.lines.isEmpty { theirNumbers } else { whatItDoes }
                     plans
                     subscribeButton
+                    promoEntry
                     footer
                 }
                 .padding(.horizontal, Theme.Metric.gutter)
@@ -137,6 +142,68 @@ struct PaywallView: View {
         }
         .disabled(store.purchasing || store.products.isEmpty)
         .opacity(store.purchasing || store.products.isEmpty ? 0.5 : 1)
+    }
+
+    /// A way past the wall for people who were asked to test this.
+    ///
+    /// On the paywall rather than buried in settings, because the moment
+    /// someone needs a code is the moment they are being asked to pay.
+    @ViewBuilder
+    private var promoEntry: some View {
+        if let redeemed {
+            Panel(accent: Theme.Palette.accent) {
+                Text(redeemed)
+                    .font(Theme.Font.bodyStrong)
+                    .foregroundStyle(Theme.Palette.text)
+            }
+        } else if showingCode {
+            Panel {
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionLabel("Promo code")
+                    HStack(spacing: 10) {
+                        TextField("Code", text: $code)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                            .font(Theme.Font.bodyStrong)
+                            .foregroundStyle(Theme.Palette.text)
+                            .padding(12)
+                            .background(Theme.Palette.surfaceHigh)
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.Metric.radius))
+                        Button(redeeming ? "…" : "Apply") {
+                            Task { await applyCode() }
+                        }
+                        .font(Theme.Font.button)
+                        .tint(Theme.Palette.accent)
+                        .disabled(redeeming || code.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+        } else {
+            Button("I have a promo code") { showingCode = true }
+                .font(Theme.Font.caption)
+                .tint(Theme.Palette.textDim)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func applyCode() async {
+        redeeming = true
+        defer { redeeming = false }
+        struct Result: Decodable { let message: String }
+        do {
+            let r: Result = try await APIClient.shared.post(
+                "/v1/promo/redeem",
+                body: ["code": code.trimmingCharacters(in: .whitespaces)]
+            )
+            redeemed = r.message
+            // The server has moved the trial, so the client's view of it is
+            // now stale — and on a blocking paywall that view is what decides
+            // whether the athlete gets their app back.
+            await store.loadStatus()
+            if !blocking { dismiss() }
+        } catch {
+            store.error = error.localizedDescription
+        }
     }
 
     private var footer: some View {

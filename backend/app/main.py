@@ -16,6 +16,7 @@ from app.routes import ingest as ingest_routes
 from app.routes import insights as insights_routes
 from app.routes import legal as legal_routes
 from app.routes import me as me_routes
+from app.routes import promo as promo_routes
 from app.routes import providers as provider_routes
 from app.routes import subscriptions as subscription_routes
 
@@ -80,6 +81,7 @@ app.include_router(goal_routes.router)
 app.include_router(insights_routes.router)
 app.include_router(export_routes.router)
 app.include_router(subscription_routes.router)
+app.include_router(promo_routes.router)
 app.include_router(admin_routes.router)
 app.include_router(legal_routes.router)
 
