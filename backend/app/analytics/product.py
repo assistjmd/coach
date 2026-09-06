@@ -164,6 +164,14 @@ def collect(db: Session) -> Metrics:
             .scalar() or 0
         ),
         "compliance_14d": _compliance_mix(db),
+        # The alarm. Generation is the one thing that must happen every day, and
+        # when it stops - an expired API key, an exhausted balance, a provider
+        # outage - nothing else in this dashboard moves. Briefs simply stop
+        # being written, which looks identical to a quiet week.
+        #
+        # Counted against accounts that have data to reason about, since someone
+        # who connected nothing is correctly missing a brief.
+        "missing_brief_today": _missing_today(db),
     }
 
     m.sources = {
@@ -207,6 +215,40 @@ def collect(db: Session) -> Metrics:
         ),
     }
     return m
+
+
+def _missing_today(db: Session) -> dict:
+    """Accounts with health data but no brief for their own today.
+
+    A handful is normal — the job waits for last night's sleep and gives up at
+    11am local, so anyone earlier than that in their own morning has not been
+    written yet. All of them is an outage.
+    """
+    from app.dates import today_for
+
+    with_data = {
+        row[0]
+        for row in db.query(Workout.user_id).distinct()
+    }
+    missing = 0
+    total = 0
+    for user in db.query(User).all():
+        if user.id not in with_data:
+            continue
+        total += 1
+        exists = (
+            db.query(DailyBrief.id)
+            .filter(DailyBrief.user_id == user.id, DailyBrief.day == today_for(user))
+            .first()
+        )
+        if exists is None:
+            missing += 1
+    return {
+        "missing": missing,
+        "of": total,
+        # The number to look at. Everyone missing means generation is down.
+        "all_missing": bool(total and missing == total),
+    }
 
 
 def _compliance_mix(db: Session) -> dict:

@@ -46,6 +46,15 @@ def show(title: str, section: dict) -> None:
 if __name__ == "__main__":
     m = fetch()
     print(f"Coach Will — {m['generated_at'][:16].replace('T', ' ')} UTC")
+
+    # Loudly, before anything else. Generation stopping looks exactly like a
+    # quiet week in every other number on this page.
+    gap = m.get("coaching", {}).get("missing_brief_today") or {}
+    if gap.get("all_missing"):
+        print(f"\n\033[1;31m  BRIEFS ARE NOT GENERATING — "
+              f"{gap['missing']} of {gap['of']} accounts have none today\033[0m")
+    elif gap.get("missing"):
+        print(f"\n  {gap['missing']} of {gap['of']} accounts still waiting on today's brief")
     for key, title in (
         ("users", "PEOPLE"),
         ("retention", "COMING BACK"),

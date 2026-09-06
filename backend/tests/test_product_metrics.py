@@ -155,3 +155,55 @@ class TestNewColumnsDoNotInventBadNews:
         assert money["trial_lapsed_not_paying"] == 0
         # No denominator yet, so no conversion rate to report.
         assert money["trial_to_paid_pct"] is None
+
+
+class TestOutageIsVisible:
+    """Generation stopping looks identical to a quiet week in every other
+    number on the dashboard: briefs simply stop being written. The operator
+    found out because they noticed their own workout had not appeared."""
+
+    def test_everyone_missing_is_flagged_as_an_outage(self, db, user):
+        from datetime import datetime, timezone
+
+        from app.models import Workout
+
+        db.add(Workout(
+            user_id=user.id, source="healthkit", source_record_id="w1",
+            started_at=datetime(2026, 9, 5, 12, tzinfo=timezone.utc),
+            ended_at=datetime(2026, 9, 5, 13, tzinfo=timezone.utc),
+            duration_s=3600, sport="running",
+        ))
+        db.commit()
+
+        gap = collect(db).coaching["missing_brief_today"]
+        assert gap["missing"] == 1
+        assert gap["all_missing"] is True
+
+    def test_a_written_brief_clears_it(self, db, user):
+        from datetime import datetime, timezone
+
+        from app.dates import today_for
+        from app.models import Workout
+
+        db.add(Workout(
+            user_id=user.id, source="healthkit", source_record_id="w1",
+            started_at=datetime(2026, 9, 5, 12, tzinfo=timezone.utc),
+            ended_at=datetime(2026, 9, 5, 13, tzinfo=timezone.utc),
+            duration_s=3600, sport="running",
+        ))
+        db.add(DailyBrief(
+            user_id=user.id, day=today_for(user), model="m",
+            readiness_summary="x", training_prescription="y", session_planned=True,
+        ))
+        db.commit()
+
+        gap = collect(db).coaching["missing_brief_today"]
+        assert gap["missing"] == 0
+        assert gap["all_missing"] is False
+
+    def test_accounts_with_no_data_are_not_counted(self, db, user):
+        """Someone who connected nothing is correctly missing a brief, and
+        counting them would keep the alarm on permanently."""
+        gap = collect(db).coaching["missing_brief_today"]
+        assert gap["of"] == 0
+        assert gap["all_missing"] is False
