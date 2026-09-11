@@ -133,3 +133,9 @@ def test_consent_history_is_append_only(client, db, user, auth):
     )
     count = db.query(LegalConsent).filter(LegalConsent.user_id == user.id).count()
     assert count == 4  # two documents, twice
+import pytest
+
+
+@pytest.fixture
+def user(unconsented_user):
+    return unconsented_user

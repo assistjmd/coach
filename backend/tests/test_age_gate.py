@@ -14,6 +14,11 @@ from app.models import LegalConsent, User
 from app.routes.me import CURRENT_LEGAL_VERSION, MINIMUM_AGE, _age_on
 
 
+@pytest.fixture
+def user(unconsented_user):
+    return unconsented_user
+
+
 def _dob_years_ago(user, years: int, days: int = 0) -> str:
     """Relative to the *user's* today, not the machine's.
 

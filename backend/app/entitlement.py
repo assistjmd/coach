@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.auth.deps import current_user
+from app.consent import require_consent, has_consent
 from app.config import settings
 from app.db import get_db
 from app.models import Subscription, User
@@ -79,6 +79,7 @@ def evaluate(db: Session, user: User) -> Entitlement:
     sub = (
         db.query(Subscription)
         .filter(Subscription.user_id == user.id, Subscription.revoked.is_(False))
+        .filter(Subscription.environment.in_(allowed_environments(user.id)))
         .order_by(Subscription.expires_at.desc().nullslast())
         .first()
     )
@@ -94,7 +95,7 @@ def evaluate(db: Session, user: User) -> Entitlement:
 
 
 def require(
-    user: User = Depends(current_user), db: Session = Depends(get_db)
+    user: User = Depends(require_consent), db: Session = Depends(get_db)
 ) -> User:
     """Gate for anything that costs money to serve.
 
@@ -114,3 +115,18 @@ def require(
             "Your trial has ended. Subscribe to keep training with Will.",
         )
     return user
+
+
+def can_generate(db: Session, user: User) -> bool:
+    """The same billing decision for API calls and unattended model work."""
+    return has_consent(db, user) and (
+        not settings().subscriptions_enforced or evaluate(db, user).allowed
+    )
+
+
+def allowed_environments(user_id) -> tuple[str, ...]:
+    cfg = settings()
+    testers = {v.strip() for v in cfg.sandbox_subscription_user_ids.split(",") if v.strip()}
+    if cfg.app_env != "prod" or str(user_id) in testers:
+        return ("Production", "Sandbox")
+    return ("Production",)

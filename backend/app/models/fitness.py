@@ -61,6 +61,7 @@ class SleepSession(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = _user_fk()
     source: Mapped[str] = mapped_column(String(32), index=True)
+    source_device: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_record_id: Mapped[str] = mapped_column(String(128))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

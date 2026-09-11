@@ -42,7 +42,7 @@ _STAGES = ("deep_s", "light_s", "rem_s", "awake_s")
 
 def _relationship(a: SleepSession, b: SleepSession) -> str:
     """How `b` relates to `a`, where `a` starts no later than `b`."""
-    if a.source != b.source:
+    if a.source != b.source or a.source_device != b.source_device:
         return "separate"
     if b.started_at < a.ended_at:
         return "overlapping"
@@ -105,16 +105,17 @@ def collapse_nights(db: Session, user_id) -> int:
     removed = 0
     # One keeper per source, since rows from different devices interleave in a
     # single start-ordered pass.
-    keepers: dict[str, SleepSession] = {}
+    keepers: dict[tuple[str, str | None], SleepSession] = {}
 
     for row in rows:
-        keeper = keepers.get(row.source)
+        key = (row.source, row.source_device)
+        keeper = keepers.get(key)
         if keeper is None:
-            keepers[row.source] = row
+            keepers[key] = row
             continue
         how = _relationship(keeper, row)
         if how == "separate":
-            keepers[row.source] = row
+            keepers[key] = row
             continue
         combine(keeper, row, how)
         db.delete(row)

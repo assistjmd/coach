@@ -9,6 +9,7 @@ from app.models.fitness import (
     SleepSession,
     Workout,
 )
+from app.models.generation_budget import GenerationBudget
 from app.models.goal import Goal
 from app.models.legal_consent import LegalConsent
 from app.models.oauth_state import OAuthStateUse
@@ -35,4 +36,5 @@ __all__ = [
     "Subscription",
     "User",
     "Workout",
+    "GenerationBudget",
 ]

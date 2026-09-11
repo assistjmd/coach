@@ -40,7 +40,25 @@ final class HealthKitManager: ObservableObject {
     private static let uploadChunkSize = 400
 
     private let store = HKHealthStore()
-    private let anchorsKey = "coach.hk.anchors.v1"
+    private var accountID: String?
+    private var generation = 0
+    private var syncing = false
+    private var syncAgain = false
+    private var observers: [HKObserverQuery] = []
+    private var anchorsKey: String { "coach.hk.anchors.v2.\(accountID ?? "signed-out")" }
+
+    func configureAccount(_ id: String?) {
+        guard accountID != id else { return }
+        generation += 1
+        for observer in observers { store.stop(observer) }
+        observers.removeAll()
+        accountID = id
+        lastSync = nil
+        lastError = nil
+        // An existing query can still complete; its generation check prevents
+        // uploading or committing anchors under the next account.
+        syncAgain = id != nil
+    }
 
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
@@ -69,8 +87,21 @@ final class HealthKitManager: ObservableObject {
     }
 
     func syncOnce() async {
+        guard let account = accountID, Keychain.read("coach.user_id") == account else { return }
+        if syncing { syncAgain = true; return }
+        syncing = true
+        defer {
+            syncing = false
+            if syncAgain {
+                syncAgain = false
+                Task { await syncOnce() }
+            }
+        }
+        let epoch = generation
         do {
-            let batch = try await fetchDeltas()
+            let (batch, anchors) = try await fetchDeltas()
+            try Task.checkCancellation()
+            guard generation == epoch, Keychain.read("coach.user_id") == account else { return }
             if batch.isEmpty {
                 // An empty pull after authorization is ambiguous by design:
                 // HealthKit returns no samples for types the user denied and
@@ -86,10 +117,16 @@ final class HealthKitManager: ObservableObject {
             // quarter's worth of samples, and as one request that body is large
             // enough to time out at the edge before the server sees it.
             for chunk in batch.chunked(max: Self.uploadChunkSize) {
+                try Task.checkCancellation()
+                guard generation == epoch, Keychain.read("coach.user_id") == account else { return }
                 let _: EmptyResp = try await APIClient.shared.postJSON(
                     "/v1/ingest/healthkit", body: chunk
                 )
             }
+            guard generation == epoch, Keychain.read("coach.user_id") == account else { return }
+            // Only acknowledge HealthKit's cursor after every chunk succeeds.
+            // Replays of earlier chunks after a failure are idempotent.
+            saveAnchors(anchors)
             lastSync = Date()
             lastError = nil
             if !hasData {
@@ -97,7 +134,7 @@ final class HealthKitManager: ObservableObject {
                 UserDefaults.standard.set(true, forKey: Self.hasDataKey)
             }
         } catch {
-            lastError = error.localizedDescription
+            if generation == epoch { lastError = error.localizedDescription }
         }
     }
 
@@ -105,6 +142,7 @@ final class HealthKitManager: ObservableObject {
     /// Previously this happened only as a side effect of re-prompting every
     /// launch, because the asked-state wasn't persisted.
     func resumeIfAuthorized() async {
+        configureAccount(Keychain.read("coach.user_id"))
         guard isAvailable, didRequestAuthorization else { return }
         do {
             try await enableBackgroundDelivery()
@@ -141,6 +179,7 @@ final class HealthKitManager: ObservableObject {
     }
 
     private func startObservers() {
+        guard observers.isEmpty, accountID != nil else { return }
         // Sleep is included here on purpose: background delivery was being
         // enabled for `.sleepAnalysis` while nothing observed it, so a night's
         // sleep never triggered a sync of its own — it only arrived if some
@@ -159,6 +198,7 @@ final class HealthKitManager: ObservableObject {
                 }
             }
             store.execute(q)
+            observers.append(q)
         }
     }
 
@@ -177,6 +217,18 @@ final class HealthKitManager: ObservableObject {
     ///
     /// Static and pure so it can be tested without a HealthKit store.
     static func nights(from samples: [HKSample]) -> [HKSleepDTO] {
+        let bySource = Dictionary(grouping: samples) { $0.sourceRevision.source.bundleIdentifier }
+        return bySource.keys.sorted().flatMap { source in
+            nightFragments(from: bySource[source] ?? []).map { value in
+                var night = value
+                night.source_device = source
+                night.is_snapshot = true
+                return night
+            }
+        }
+    }
+
+    private static func nightFragments(from samples: [HKSample]) -> [HKSleepDTO] {
         let staged = samples
             .compactMap { $0 as? HKCategorySample }
             .filter { sample in
@@ -232,7 +284,7 @@ final class HealthKitManager: ObservableObject {
 
     // MARK: - delta fetching
 
-    private func fetchDeltas() async throws -> HealthKitBatch {
+    private func fetchDeltas() async throws -> (HealthKitBatch, [String: HKQueryAnchor]) {
         var batch = HealthKitBatch()
         var anchors = loadAnchors()
 
@@ -265,7 +317,13 @@ final class HealthKitManager: ObservableObject {
         // Sleep
         if let sleepType = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) {
             let (sleeps, newAnchor) = try await fetchAnchored(type: sleepType, anchor: anchors["sleep"])
-            batch.sleep.append(contentsOf: Self.nights(from: sleeps))
+            if let start = sleeps.map(\.startDate).min(), let end = sleeps.map(\.endDate).max() {
+                let complete = try await sleepSnapshot(
+                    type: sleepType, start: start.addingTimeInterval(-86400),
+                    end: end.addingTimeInterval(86400)
+                )
+                batch.sleep.append(contentsOf: Self.nights(from: complete))
+            }
             anchors["sleep"] = newAnchor
         }
 
@@ -330,8 +388,7 @@ final class HealthKitManager: ObservableObject {
         // small samples, and the coach reasons about daily totals anyway.
         batch.body_metrics.append(contentsOf: await dailyTotals())
 
-        saveAnchors(anchors)
-        return batch
+        return (batch, anchors)
     }
 
     /// Per-day sums for the activity metrics an iPhone records on its own.
@@ -423,6 +480,20 @@ final class HealthKitManager: ObservableObject {
                                         peak.map { Int($0.rounded()) }))
             }
             store.execute(q)
+        }
+    }
+
+    private func sleepSnapshot(type: HKSampleType, start: Date, end: Date) async throws -> [HKSample] {
+        try await withCheckedThrowingContinuation { cont in
+            let query = HKSampleQuery(
+                sampleType: type,
+                predicate: HKQuery.predicateForSamples(withStart: start, end: end),
+                limit: HKObjectQueryNoLimit, sortDescriptors: nil
+            ) { _, samples, error in
+                if let error { cont.resume(throwing: error) }
+                else { cont.resume(returning: samples ?? []) }
+            }
+            store.execute(query)
         }
     }
 
@@ -548,6 +619,8 @@ struct HKSleepDTO: Encodable {
     var light_s: Int?
     var rem_s: Int?
     var awake_s: Int?
+    var source_device: String? = nil
+    var is_snapshot: Bool = false
 }
 
 struct HKHRVDTO: Encodable {

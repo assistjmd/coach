@@ -34,6 +34,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.auth.deps import current_user
+from app.consent import require_consent, has_consent
 from app.auth.jwt import decode_state_token, issue_state_token
 from app.config import settings
 from app.crypto import decrypt, encrypt
@@ -72,7 +73,7 @@ def _deep_link(
 
 
 @router.post("/{slug}/authorize", response_model=AuthorizeResponse)
-def authorize(slug: str, user: User = Depends(current_user)) -> AuthorizeResponse:
+def authorize(slug: str, user: User = Depends(require_consent)) -> AuthorizeResponse:
     """Mint a one-time authorize URL for the signed-in user.
 
     POST, not GET: this issues a single-use credential, so it must never be
@@ -161,6 +162,10 @@ def callback(
         log.warning("oauth callback ref=%s provider=%s: no code and no error", ref, slug)
         return _deep_link(slug, reason="exchange_failed", ref=ref)
 
+    owner = db.get(User, claims.user_id)
+    if owner is None or not has_consent(db, owner):
+        return _deep_link(slug, reason="invalid_state", ref=ref)
+
     try:
         provider = get_provider(slug)
     except KeyError:
@@ -233,7 +238,7 @@ class SyncResponse(BaseModel):
 @router.post("/{slug}/sync", response_model=SyncResponse)
 def sync_now(
     slug: str,
-    user: User = Depends(current_user),
+    user: User = Depends(require_consent),
     db: Session = Depends(get_db),
 ) -> SyncResponse:
     """Pull from a connected provider immediately.
@@ -257,7 +262,7 @@ def sync_now(
         written = sync_one(row.id)
     except Exception as e:
         log.exception("manual sync failed for user=%s provider=%s", user.id, slug)
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"sync failed: {e}") from e
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Provider sync failed. Try again later.") from e
     return SyncResponse(provider=slug, records=written)
 
 

@@ -17,6 +17,7 @@ os.environ.setdefault("JWT_SECRET", "test-secret-not-used-anywhere-real")
 os.environ.setdefault("FERNET_KEY", "1YMBHLOgqjNq1tCLmDXwWWvKQPMD_ELkZoY6fZ5S-9Y=")
 
 import uuid
+from datetime import date
 
 import pytest
 from alembic.config import Config
@@ -27,7 +28,8 @@ from alembic import command
 from app.auth.jwt import issue_jwt
 from app.db import Base, engine, get_db
 from app.main import app
-from app.models import User
+from app.models import User, LegalConsent
+from app.consent import CURRENT_LEGAL_VERSION
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -37,6 +39,8 @@ def _schema():
     Using alembic rather than `create_all` means a migration that doesn't apply
     cleanly fails the suite — which is the point of having migrations.
     """
+    if engine().url.database not in {"coach_test", "coach_audit"}:
+        raise RuntimeError("Refusing to reset a database other than coach_test or coach_audit")
     Base.metadata.drop_all(bind=engine())
     with engine().begin() as conn:
         conn.exec_driver_sql("DROP TABLE IF EXISTS alembic_version")
@@ -72,11 +76,21 @@ def client(db) -> TestClient:
 
 
 @pytest.fixture
-def user(db) -> User:
+def unconsented_user(db) -> User:
     u = User(email=f"{uuid.uuid4().hex}@example.com", display_name="Test User")
     db.add(u)
     db.commit()
     db.refresh(u)
+    return u
+
+
+@pytest.fixture
+def user(db, unconsented_user) -> User:
+    u = unconsented_user
+    u.date_of_birth = date(1990, 1, 1)
+    db.add_all([LegalConsent(user_id=u.id, document=doc, version=CURRENT_LEGAL_VERSION)
+                for doc in ("terms", "privacy")])
+    db.commit()
     return u
 
 

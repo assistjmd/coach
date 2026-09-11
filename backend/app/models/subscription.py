@@ -43,6 +43,8 @@ class Subscription(Base):
     # immediately rather than at the next renewal date.
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_renew: Mapped[bool] = mapped_column(Boolean, default=True)
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    transaction_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

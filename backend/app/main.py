@@ -27,8 +27,8 @@ async def lifespan(app: FastAPI):
     # authorization code in its query string, and uvicorn's access log records
     # the full request line.
     install_log_redaction()
-    apple.warm_cache()
     if settings().app_env != "test":
+        apple.warm_cache()
         scheduler.start()
     yield
     scheduler.shutdown()

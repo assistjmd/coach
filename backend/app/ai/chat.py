@@ -21,7 +21,7 @@ from app.models import ChatMessage, User
 
 def stream_chat(db: Session, user: User, message: str) -> Iterator[str]:
     cfg = settings()
-    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key, timeout=90, max_retries=0)
     snap = gather_recent(db, user, days=14)
     profile = user_profile(user, snap.get("goal"))
 

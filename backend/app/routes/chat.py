@@ -1,20 +1,21 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+import json
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.ai.chat import stream_chat
 from app.auth.deps import current_user
-from app.config import settings
 from app.db import SessionLocal, get_db
 from app.entitlement import require as paid
 from app.quota import enforce, limit_for, used_recently
 from app.models import ChatMessage, User
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
+log = logging.getLogger(__name__)
 
 
 class ChatBody(BaseModel):
@@ -105,7 +106,8 @@ def history(
 
 
 @router.post("")
-def chat(body: ChatBody, user: User = Depends(paid), db: Session = Depends(get_db)):
+def chat(body: ChatBody, user: User = Depends(paid), db: Session = Depends(get_db),
+         x_coach_stream_version: str = Header(default="1")):
     # Session adjustment has its own allowance — see app/quota.py.
     enforce(db, user, kind="chat")
 
@@ -114,9 +116,17 @@ def chat(body: ChatBody, user: User = Depends(paid), db: Session = Depends(get_d
 
     def event_stream():
         chunks: list[str] = []
-        for delta in stream_chat(db, user, body.message):
-            chunks.append(delta)
-            yield f"data: {delta}\n\n"
+        try:
+            for delta in stream_chat(db, user, body.message):
+                chunks.append(delta)
+                if x_coach_stream_version == "2":
+                    yield f"data: {json.dumps({'delta': delta})}\n\n"
+                else:
+                    yield "".join(f"data: {line}\n" for line in delta.split("\n")) + "\n"
+        except Exception:
+            log.exception("chat generation failed for user %s", user.id)
+            yield 'event: error\ndata: {"error":"The reply was interrupted. Please try again."}\n\n'
+            return
         full = "".join(chunks)
         # Fresh session: the request-scoped `db` is closed once streaming starts.
         with SessionLocal() as s:

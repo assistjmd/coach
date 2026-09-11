@@ -6,12 +6,13 @@ built from a day that hasn't happened yet, is worse than not sending one.
 """
 
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from app.jobs.daily_brief import TARGET_LOCAL_HOUR, _is_target_hour, run_for_all_users
-from app.models import DailyBrief, User
+from app.models import DailyBrief, User, LegalConsent
+from app.consent import CURRENT_LEGAL_VERSION
 
 UTC = ZoneInfo("UTC")
 
@@ -83,6 +84,7 @@ def test_generates_only_for_users_due_now(db):
 def _slept(db, user, ended: datetime | None = None):
     """Give the user a night that ended this morning, their time."""
     from app.models import SleepSession
+    _consent(db, user)
 
     ended = ended or datetime(2026, 8, 6, 12, 30, tzinfo=UTC)  # 05:30 in LA
     db.add(SleepSession(
@@ -91,6 +93,13 @@ def _slept(db, user, ended: datetime | None = None):
         started_at=ended - timedelta(hours=7), ended_at=ended,
         light_s=20000,
     ))
+    db.commit()
+
+
+def _consent(db, user):
+    user.date_of_birth = date(1990, 1, 1)
+    db.add_all([LegalConsent(user_id=user.id, document=d, version=CURRENT_LEGAL_VERSION)
+                for d in ("terms", "privacy")])
     db.commit()
 
 
@@ -127,6 +136,7 @@ class TestWaitsForLastNightsSleep:
         user = User(timezone="America/Los_Angeles", apple_sub="never-sleeps")
         db.add(user)
         db.commit()
+        _consent(db, user)
 
         now = datetime(2026, 8, 6, 18, 0, tzinfo=UTC)  # 11:00 in LA
         with patch("app.jobs.daily_brief.SessionLocal", lambda: _use(db)), \

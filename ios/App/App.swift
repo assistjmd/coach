@@ -18,6 +18,9 @@ struct CoachApp: App {
                 // notifications in Settings would otherwise leave our stored
                 // preference claiming a reminder that no longer exists.
                 .task { await MorningNudge.shared.refresh() }
+                .onChange(of: session.userId, initial: true) { _, id in
+                    health.configureAccount(id)
+                }
         }
     }
 }

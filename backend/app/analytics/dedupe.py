@@ -27,7 +27,7 @@ from app.models import Workout
 
 log = logging.getLogger(__name__)
 
-# Share of the shorter session that must overlap before we call it a duplicate.
+# Share of the longer session that must overlap before we call it a duplicate.
 # Different apps clock the same lift at 41 and 42 minutes and may start a minute
 # apart, so an exact match would catch nothing. Set high enough that a bike
 # followed by a run is never merged.
@@ -68,12 +68,17 @@ def _overlaps(a_start, a_end, b_start, b_end) -> bool:
     overlap = (min(a_end, b_end) - max(a_start, b_start)).total_seconds()
     if overlap <= 0:
         return False
-    shorter = min(
+    longer = max(
         (a_end - a_start).total_seconds(), (b_end - b_start).total_seconds()
     )
-    if shorter <= 0:
+    if longer <= 0:
         return False
-    return overlap / shorter >= _OVERLAP_RATIO
+    return overlap / longer >= _OVERLAP_RATIO
+
+
+def compatible_sports(a: str | None, b: str | None) -> bool:
+    generic = {None, "other", "workout", "unknown"}
+    return a in generic or b in generic or a == b
 
 
 def _completeness(w: Workout) -> tuple[int, int]:
@@ -90,7 +95,8 @@ def _completeness(w: Workout) -> tuple[int, int]:
 
 
 def find_duplicate(
-    db: Session, user_id, started_at: datetime, ended_at: datetime
+    db: Session, user_id, started_at: datetime, ended_at: datetime,
+    sport: str | None = None,
 ) -> Workout | None:
     """An existing workout describing the same session, if there is one.
 
@@ -111,7 +117,9 @@ def find_duplicate(
         .all()
     )
     for c in candidates:
-        if _overlaps(started_at, ended_at, c.started_at, c.ended_at):
+        if compatible_sports(sport, c.sport) and _overlaps(
+            started_at, ended_at, c.started_at, c.ended_at
+        ):
             return c
     return None
 
@@ -155,7 +163,8 @@ def collapse_existing(db: Session, user_id) -> int:
 
     for w in workouts:
         match = next(
-            (k for k in kept if _overlaps(w.started_at, w.ended_at, k.started_at, k.ended_at)),
+            (k for k in kept if compatible_sports(w.sport, k.sport)
+             and _overlaps(w.started_at, w.ended_at, k.started_at, k.ended_at)),
             None,
         )
         if match is None:

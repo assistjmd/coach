@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.data import gather_recent, user_profile
 from app.ai.prompts import SYSTEM_PROMPT, user_context_block
+from app.ai.validation import HeadlinePayload
 from app.config import settings
 from app.models import DailyBrief, User
 
@@ -40,7 +41,7 @@ def refresh_headline(db: Session, user: User, brief: DailyBrief) -> bool:
     new wording can refer to it, and is never written back.
     """
     cfg = settings()
-    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key, timeout=90, max_retries=0)
     snap = gather_recent(db, user, days=14)
     profile = user_profile(user, snap.get("goal"))
 
@@ -90,8 +91,9 @@ def refresh_headline(db: Session, user: User, brief: DailyBrief) -> bool:
         parsed = json.loads(raw)
         if not isinstance(parsed, dict):
             raise ValueError("not an object")
+        parsed = HeadlinePayload.model_validate(parsed).model_dump()
     except ValueError as e:
-        log.error("headline refresh unparseable for user %s — %r", user.id, raw[:300])
+        log.error("headline refresh unusable for user %s", user.id)
         raise HeadlineUnavailable("no usable headline") from e
 
     summary = str(parsed.get("readiness_summary") or "").strip()

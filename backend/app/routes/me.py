@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.auth.deps import current_user
+from app.consent import CURRENT_LEGAL_VERSION, MINIMUM_AGE
 from app.dates import today_for
 from app.db import get_db
 from app.models import LegalConsent, OAuthToken, User
@@ -196,13 +197,11 @@ def reset_onboarding(
 # Bumped when either document changes materially. The app compares this against
 # what the user last accepted and re-prompts on a mismatch, so a silent edit to
 # the terms does not quietly count as agreed.
-CURRENT_LEGAL_VERSION = "2026-08-05"
 
 
 # The terms set this. Sixteen rather than thirteen because the app processes
 # health data, which most privacy regimes treat as a special category with a
 # higher age of valid consent.
-MINIMUM_AGE = 16
 
 
 class ConsentBody(BaseModel):

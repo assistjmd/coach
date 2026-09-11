@@ -22,6 +22,7 @@ import anthropic
 from sqlalchemy.orm import Session
 
 from app.ai.brief import clean_items
+from app.ai.validation import AdjustPayload
 from app.ai.data import gather_recent, user_profile
 from app.ai.prompts import ADJUST_PROMPT, SYSTEM_PROMPT, user_context_block
 from app.config import settings
@@ -63,7 +64,7 @@ def adjust_session(db: Session, user: User, message: str) -> AdjustResult:
     if brief is None:
         raise NoSessionToday("no brief for today")
 
-    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key, timeout=90, max_retries=0)
     snap = gather_recent(db, user, days=14)
     profile = user_profile(user, snap.get("goal"))
 
@@ -123,13 +124,14 @@ def adjust_session(db: Session, user: User, message: str) -> AdjustResult:
         raw = raw.strip("`").lstrip("json").strip()
     try:
         parsed = json.loads(raw)
+        parsed = AdjustPayload.model_validate(parsed).model_dump()
     except ValueError as e:
         # Logged in full: the only way to see which requests push the model off
         # JSON is to keep the reply that did it.
-        log.error("adjust: unparseable reply for user %s — %r", user.id, raw[:400])
+        log.error("adjust: unusable model reply for user %s", user.id)
         raise UnreadableReply("could not read the reply") from e
     if not isinstance(parsed, dict):
-        log.error("adjust: reply was not an object for user %s — %r", user.id, raw[:200])
+        log.error("adjust: reply was not an object for user %s", user.id)
         raise UnreadableReply("reply was not an object")
 
     reply = str(parsed.get("reply") or "").strip()

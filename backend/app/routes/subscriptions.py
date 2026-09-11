@@ -21,12 +21,14 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+import uuid
 
 from app.auth.deps import current_user
 from app.config import settings
 from app.db import get_db
 from app.analytics.pitch import build as build_pitch
-from app.entitlement import evaluate
+from app.entitlement import evaluate, allowed_environments
 from app.models import Subscription, User
 from app.subscriptions.apple import VerificationError, verify_notification, verify_transaction
 
@@ -109,10 +111,17 @@ async def apple_notifications(request: Request, db: Session = Depends(get_db)) -
     payload we cannot act on: Apple retries non-2xx for days, and retrying will
     not make an unknown transaction known.
     """
-    body = await request.json()
+    try:
+        body = await request.json()
+    except ValueError:
+        return {"ok": False, "reason": "invalid payload"}
+    if not isinstance(body, dict):
+        return {"ok": False, "reason": "invalid payload"}
     signed = body.get("signedPayload")
     if not signed:
         return {"ok": False, "reason": "no payload"}
+    if not isinstance(signed, str) or len(signed) > 64000:
+        raise HTTPException(400, "invalid payload")
 
     try:
         notification = verify_notification(signed)
@@ -126,12 +135,20 @@ async def apple_notifications(request: Request, db: Session = Depends(get_db)) -
     if tx is None:
         return {"ok": True, "note": "nothing to apply"}
 
+    _lock_transaction(db, tx.original_transaction_id)
     sub = (
         db.query(Subscription)
         .filter(Subscription.original_transaction_id == tx.original_transaction_id)
         .one_or_none()
     )
     if sub is None:
+        try:
+            owner = db.get(User, uuid.UUID(tx.app_account_token or ""))
+        except ValueError:
+            owner = None
+        if owner is not None:
+            _upsert(db, owner.id, tx)
+            return {"ok": True}
         # A renewal for a subscription we never saw verified. Nothing to attach
         # it to — the user row is only known via the app's own verify call.
         log.warning(
@@ -141,28 +158,39 @@ async def apple_notifications(request: Request, db: Session = Depends(get_db)) -
         )
         return {"ok": True, "note": "unknown subscription"}
 
+    if tx.environment != sub.environment or (
+        tx.app_account_token and tx.app_account_token != str(sub.user_id)
+    ):
+        raise HTTPException(409, "notification does not match the subscription account")
     _apply(sub, tx, notification.notification_type)
     db.commit()
     return {"ok": True}
 
 
 def _upsert(db: Session, user_id, tx) -> Subscription:
+    if tx.environment not in allowed_environments(user_id):
+        raise HTTPException(400, "this purchase environment is not enabled for this account")
+    if tx.signed_at is None:
+        raise HTTPException(400, "purchase is missing its signed date")
+    _lock_transaction(db, tx.original_transaction_id)
     sub = (
         db.query(Subscription)
         .filter(Subscription.original_transaction_id == tx.original_transaction_id)
         .one_or_none()
     )
     if sub is None:
+        # Apple's signature must bind a new purchase to this Coach account.
+        # Knowing someone else's valid JWS is not proof of owning their account.
+        if tx.app_account_token != str(user_id):
+            raise HTTPException(409, "this purchase is not linked to this account")
         sub = Subscription(
             user_id=user_id, original_transaction_id=tx.original_transaction_id
         )
         db.add(sub)
     elif sub.user_id != user_id:
-        # The same Apple ID restoring onto a second Coach Will account. Move the
-        # entitlement rather than duplicating it: one purchase, one active
-        # subscription, and the most recent account is the one in use.
-        log.info("subscription %s moved to user %s", tx.original_transaction_id, user_id)
-        sub.user_id = user_id
+        raise HTTPException(409, "this purchase belongs to another account; sign in to restore it")
+    elif tx.app_account_token and tx.app_account_token != str(user_id):
+        raise HTTPException(409, "this purchase is not linked to this account")
 
     _apply(sub, tx, None)
     db.commit()
@@ -171,6 +199,15 @@ def _upsert(db: Session, user_id, tx) -> Subscription:
 
 
 def _apply(sub: Subscription, tx, notification_type: str | None) -> None:
+    if sub.signed_at and (tx.signed_at is None or tx.signed_at <= sub.signed_at):
+        return
+    # Even a newly signed copy of an older renewal must not shorten the
+    # currently paid period, or revoke a different, later transaction.
+    if (sub.expires_at and tx.expires_at and tx.expires_at < sub.expires_at
+            and tx.transaction_id != sub.transaction_id):
+        return
+    sub.signed_at = tx.signed_at
+    sub.transaction_id = tx.transaction_id
     sub.product_id = tx.product_id
     sub.environment = tx.environment
     sub.auto_renew = tx.auto_renew
@@ -183,3 +220,10 @@ def _apply(sub: Subscription, tx, notification_type: str | None) -> None:
         sub.expires_at = min(
             sub.expires_at or datetime.now(timezone.utc), datetime.now(timezone.utc)
         )
+    else:
+        sub.revoked = False
+
+
+def _lock_transaction(db: Session, original: str) -> None:
+    # Includes first insert, for which SELECT FOR UPDATE has no row to lock.
+    db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(original, 0))))

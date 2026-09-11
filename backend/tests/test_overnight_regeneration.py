@@ -6,12 +6,13 @@ spend tokens in a loop either. The flag on the brief is what bounds it: once a
 brief has the night, it is never regenerated again.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 from app.analytics.overnight import last_night_arrived
 from app.jobs.daily_brief import regenerate_if_sleep_landed
-from app.models import DailyBrief, SleepSession, User
+from app.models import DailyBrief, SleepSession, User, LegalConsent
+from app.consent import CURRENT_LEGAL_VERSION
 
 NOW = datetime.now(timezone.utc)
 
@@ -20,11 +21,17 @@ def _user(db, tz="America/New_York"):
     u = User(email=f"o{id(db)}@example.com", timezone=tz)
     db.add(u)
     db.flush()
+    u.date_of_birth = date(1990, 1, 1)
+    db.add_all([LegalConsent(user_id=u.id, document=d, version=CURRENT_LEGAL_VERSION)
+                for d in ("terms", "privacy")])
     return u
 
 
 def _night(db, user, hours=7, ends_hours_ago=2):
-    end = NOW - timedelta(hours=ends_hours_ago)
+    from app.dates import today_for, zone_for
+    # A local morning, independent of the wall-clock hour the suite runs at.
+    end = datetime.combine(today_for(user), datetime.min.time(), tzinfo=zone_for(user))
+    end += timedelta(hours=7 - (ends_hours_ago - 2))
     db.add(SleepSession(
         user_id=user.id, source="healthkit",
         source_record_id=f"n-{end.isoformat()}",
@@ -73,7 +80,7 @@ class TestRegeneration:
         _brief(db, user, had_sleep=False)
         _night(db, user)
 
-        with patch("app.jobs.daily_brief.generate_daily_brief") as gen:
+        with patch("app.ai.headline.refresh_headline", return_value=True) as gen:
             assert regenerate_if_sleep_landed(db, user) is True
             assert gen.call_count == 1
 
@@ -83,7 +90,7 @@ class TestRegeneration:
         _brief(db, user, had_sleep=False)
         _night(db, user)
 
-        with patch("app.jobs.daily_brief.generate_daily_brief"):
+        with patch("app.ai.headline.refresh_headline", return_value=True):
             assert regenerate_if_sleep_landed(db, user) is True
             assert regenerate_if_sleep_landed(db, user) is False
             assert regenerate_if_sleep_landed(db, user) is False
@@ -93,14 +100,14 @@ class TestRegeneration:
         _brief(db, user, had_sleep=True)
         _night(db, user)
 
-        with patch("app.jobs.daily_brief.generate_daily_brief") as gen:
+        with patch("app.ai.headline.refresh_headline", return_value=True) as gen:
             assert regenerate_if_sleep_landed(db, user) is False
             assert gen.call_count == 0
 
     def test_nothing_happens_without_a_brief(self, db):
         user = _user(db)
         _night(db, user)
-        with patch("app.jobs.daily_brief.generate_daily_brief") as gen:
+        with patch("app.ai.headline.refresh_headline", return_value=True) as gen:
             assert regenerate_if_sleep_landed(db, user) is False
             assert gen.call_count == 0
 
@@ -114,7 +121,7 @@ class TestRegeneration:
             "ended_at": (NOW - timedelta(hours=2)).isoformat(),
             "light_s": 20000,
         }]}
-        with patch("app.jobs.daily_brief.generate_daily_brief", side_effect=RuntimeError("boom")):
+        with patch("app.ai.headline.refresh_headline", side_effect=RuntimeError("boom")):
             r = client.post("/v1/ingest/healthkit", headers=auth, json=payload)
         assert r.status_code == 200
         assert db.query(SleepSession).filter(SleepSession.user_id == user.id).count() == 1

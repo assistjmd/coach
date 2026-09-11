@@ -58,6 +58,9 @@ _EXHAUSTED = {
 
 def enforce(db: Session, user: User, kind: str = "chat") -> None:
     """Raise if the athlete has spent that surface's allowance."""
+    # The caller commits its user-message reservation before releasing this
+    # lock. A concurrent request then counts the committed reservation.
+    db.query(User.id).filter(User.id == user.id).with_for_update().one()
     limit = limit_for(kind)
     if used_recently(db, user, kind) >= limit:
         # 429 rather than 403: it is a rate limit, and the client should say when

@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     # Turn on to require a subscription. Off until the products exist in App
     # Store Connect, so a deploy cannot lock out every current tester.
     subscriptions_enforced: bool = False
+    # Production defaults to paid receipts only. Review/TestFlight access must
+    # be explicitly configured; never infer it from a client-supplied flag.
+    sandbox_subscription_user_ids: str = ""
 
     # Which direct connections to offer, by slug. Empty means Apple Health only.
     #

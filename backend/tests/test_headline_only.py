@@ -81,7 +81,7 @@ def test_an_unusable_reply_leaves_everything_alone(db, user, brief, monkeypatch)
     assert refresh_after_activity(db, user) is False
     db.refresh(brief)
     assert brief.readiness_summary == "Recovered. Shoulders and back today."
-    assert brief.revision == 0
+    assert brief.revision == 1  # Failed model attempts still spend the allowance.
 
 
 def test_the_ceiling_actually_holds(db, user, brief, monkeypatch):

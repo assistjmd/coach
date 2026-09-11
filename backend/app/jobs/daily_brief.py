@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.ai.brief import generate_daily_brief
 from app.analytics.overnight import last_night_arrived
 from app.db import SessionLocal
+from app.entitlement import can_generate
+from sqlalchemy import update
 from app.models import DailyBrief, User
 
 log = logging.getLogger("coach.brief")
@@ -44,6 +46,8 @@ def run_for_all_users(now: datetime | None = None) -> None:
         users = db.query(User).all()
         for u in users:
             try:
+                if not can_generate(db, u):
+                    continue
                 local_hour = now.astimezone(_zone(u)).hour
                 if not TARGET_LOCAL_HOUR <= local_hour <= DEADLINE_LOCAL_HOUR:
                     continue
@@ -77,6 +81,7 @@ def run_for_all_users(now: datetime | None = None) -> None:
                     u.id, local_day, slept,
                 )
             except Exception:
+                db.rollback()
                 log.exception("daily brief failed for user %s", u.id)
 
 
@@ -121,6 +126,9 @@ def refresh_after_activity(db, user: User) -> bool:
     from app.ai.headline import HeadlineUnavailable, refresh_headline
     from app.dates import today_for
 
+    if not can_generate(db, user):
+        return False
+
     day = today_for(user)
     brief = (
         db.query(DailyBrief)
@@ -133,7 +141,11 @@ def refresh_after_activity(db, user: User) -> bool:
     # once per ingest batch and a phone chunks its upload, so several land in a
     # row and each must see what the last one wrote.
     db.refresh(brief)
-    if (brief.revision or 0) >= MAX_REVISIONS:
+    reserved = db.execute(update(DailyBrief).where(
+        DailyBrief.id == brief.id, DailyBrief.revision < MAX_REVISIONS
+    ).values(revision=DailyBrief.revision + 1).returning(DailyBrief.id)).scalar_one_or_none()
+    db.commit()
+    if reserved is None:
         return False
 
     before = brief.session_items
@@ -147,7 +159,6 @@ def refresh_after_activity(db, user: User) -> bool:
     # Belt and braces. The session must be exactly what it was.
     assert brief.session_items == before, "a headline refresh must not touch the plan"
 
-    brief.revision = (brief.revision or 0) + 1
     db.commit()
     log.info("headline refreshed for user %s (%s, revision %d)", user.id, day, brief.revision)
     return True
@@ -176,7 +187,10 @@ def regenerate_if_sleep_landed(db, user: User) -> bool:
     if not last_night_arrived(db, user):
         return False
 
-    generate_daily_brief(db, user, day=day)
+    # Late sleep can update readiness, but must never replace exercises or
+    # strand ticks/weights, even if the athlete has not opened the sheet yet.
+    if not refresh_after_activity(db, user):
+        return False
     brief.had_overnight_sleep = True
     db.commit()
     log.info("brief regenerated with last night's sleep for user %s (%s)", user.id, day)

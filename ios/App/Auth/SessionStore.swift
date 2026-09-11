@@ -94,6 +94,7 @@ final class SessionStore: ObservableObject {
     }
 
     func signOut() {
+        Store.shared.resetSession()
         Keychain.delete(keychainKey)
         Keychain.delete(userIdKey)
         userId = nil

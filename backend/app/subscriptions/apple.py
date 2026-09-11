@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from appstoreserverlibrary.models.Environment import Environment
@@ -41,6 +41,9 @@ class AppleTransaction:
     expires_at: datetime | None
     revoked_at: datetime | None
     auto_renew: bool
+    app_account_token: str | None = None
+    signed_at: datetime | None = None
+    transaction_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -130,13 +133,9 @@ def verify_notification(signed: str) -> AppleNotification:
     renewal = getattr(data, "signedRenewalInfo", None) if data else None
     if tx is not None and renewal:
         try:
-            info = _verifier(_both_environments()[0]).verify_and_decode_renewal_info(renewal)
-            tx = AppleTransaction(
-                original_transaction_id=tx.original_transaction_id,
-                product_id=tx.product_id,
-                environment=tx.environment,
-                expires_at=tx.expires_at,
-                revoked_at=tx.revoked_at,
+            info = _verifier(Environment(tx.environment)).verify_and_decode_renewal_info(renewal)
+            tx = replace(
+                tx,
                 auto_renew=bool(getattr(info, "autoRenewStatus", 1)),
             )
         except (VerificationException, ValueError):
@@ -145,8 +144,8 @@ def verify_notification(signed: str) -> AppleNotification:
             log.warning("could not decode renewal info; keeping transaction values")
 
     return AppleNotification(
-        notification_type=str(getattr(payload, "notificationType", "") or ""),
-        subtype=str(getattr(payload, "subtype", "") or "") or None,
+        notification_type=getattr(getattr(payload, "notificationType", None), "value", ""),
+        subtype=getattr(getattr(payload, "subtype", None), "value", None),
         transaction=tx,
     )
 
@@ -158,7 +157,7 @@ def _to_transaction(payload) -> AppleTransaction:
         raise VerificationError("transaction is missing its identifiers")
 
     allowed = {p.strip() for p in settings().subscription_product_ids.split(",") if p.strip()}
-    if allowed and product not in allowed:
+    if product not in allowed:
         # A valid signature for a product we do not sell. Consumables and
         # anything from another of the developer's apps land here.
         raise VerificationError(f"unknown product {product}")
@@ -171,4 +170,7 @@ def _to_transaction(payload) -> AppleTransaction:
         expires_at=_ms_to_dt(getattr(payload, "expiresDate", None)),
         revoked_at=_ms_to_dt(getattr(payload, "revocationDate", None)),
         auto_renew=True,
+        app_account_token=getattr(payload, "appAccountToken", None),
+        signed_at=_ms_to_dt(getattr(payload, "signedDate", None)),
+        transaction_id=getattr(payload, "transactionId", None),
     )

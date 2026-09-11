@@ -81,6 +81,9 @@ final class Store: ObservableObject {
 
     func refresh() async {
         await loadProducts()
+        for await result in Transaction.unfinished {
+            await handle(result)
+        }
         await loadStatus()
     }
 
@@ -91,8 +94,10 @@ final class Store: ObservableObject {
     }
 
     func loadStatus() async {
+        guard let account = Keychain.read("coach.user_id") else { return }
         do {
             let s: Status = try await APIClient.shared.get("/v1/subscriptions/status")
+            guard Keychain.read("coach.user_id") == account else { return }
             state = s.state
             enforced = s.enforced
             trialDaysLeft = s.trialDaysLeft
@@ -108,7 +113,11 @@ final class Store: ObservableObject {
         error = nil
         defer { purchasing = false }
         do {
-            switch try await product.purchase() {
+            guard let id = Keychain.read("coach.user_id"), let account = UUID(uuidString: id) else {
+                error = "Sign in before subscribing."
+                return
+            }
+            switch try await product.purchase(options: [.appAccountToken(account)]) {
             case .success(let verification):
                 await handle(verification)
             case .userCancelled:
@@ -132,6 +141,11 @@ final class Store: ObservableObject {
     func restore() async {
         purchasing = true
         defer { purchasing = false }
+        do { try await AppStore.sync() }
+        catch {
+            self.error = "Couldn't reach the App Store. Try restoring again."
+            return
+        }
         for await result in Transaction.currentEntitlements {
             await handle(result)
         }
@@ -150,23 +164,37 @@ final class Store: ObservableObject {
         case .verified(let value): tx = value
         case .unverified(let value, _): tx = value
         }
-        await send(result.jwsRepresentation)
-        // Always finish, or StoreKit replays the transaction on every launch.
-        await tx.finish()
+        if await send(result.jwsRepresentation) {
+            // Finish only after durable server acknowledgement. A failed
+            // upload remains in Transaction.unfinished for the next refresh.
+            await tx.finish()
+        }
     }
 
-    private func send(_ jws: String) async {
+    private func send(_ jws: String) async -> Bool {
+        guard let account = Keychain.read("coach.user_id") else { return false }
         do {
             let s: Status = try await APIClient.shared.post(
                 "/v1/subscriptions/verify", body: ["signed_transaction": jws]
             )
+            guard Keychain.read("coach.user_id") == account else { return false }
             state = s.state
             enforced = s.enforced
             trialDaysLeft = s.trialDaysLeft
             pitch = s.pitch
+            return true
         } catch {
             self.error = "Purchase went through, but I couldn't confirm it. "
                 + "Pull to refresh in a moment."
+            return false
         }
+    }
+
+    func resetSession() {
+        state = "trial"
+        enforced = false
+        trialDaysLeft = 0
+        pitch = Pitch()
+        error = nil
     }
 }

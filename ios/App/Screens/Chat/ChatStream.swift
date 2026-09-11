@@ -3,7 +3,7 @@ import Foundation
 enum ChatStream {
     static func stream(message: String) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     var req = URLRequest(
                         url: APIClient.shared.baseURL.appendingPathComponent("/v1/chat")
@@ -11,6 +11,7 @@ enum ChatStream {
                     req.httpMethod = "POST"
                     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    req.setValue("2", forHTTPHeaderField: "X-Coach-Stream-Version")
                     if let token = Keychain.read("coach.access_token") {
                         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
                     }
@@ -32,14 +33,22 @@ enum ChatStream {
                         guard line.hasPrefix("data: ") else { continue }
                         let payload = String(line.dropFirst(6))
                         if payload == "[DONE]" { break }
-                        continuation.yield(payload)
+                        let event = try JSONDecoder().decode(Event.self, from: Data(payload.utf8))
+                        if let error = event.error { throw APIError.http(502, error) }
+                        if let delta = event.delta { continuation.yield(delta) }
                     }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    private struct Event: Decodable {
+        let delta: String?
+        let error: String?
     }
 
     /// FastAPI wraps errors as `{"detail": "..."}`. Pull the sentence out so it

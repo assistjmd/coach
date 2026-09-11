@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.analytics.dedupe import better, find_duplicate, record_contributor
 from app.crypto import encrypt
 from app.db import SessionLocal
+from app.consent import has_consent
+from app.models import User
 from app.models import (
     BodyMetric,
     HeartRateSample,
@@ -95,6 +97,9 @@ def _sync_one_inner(token_id) -> int:
         tok = db.get(OAuthToken, token_id)
         if tok is None:
             return 0
+        owner = db.get(User, tok.user_id)
+        if owner is None or not has_consent(db, owner):
+            return 0
         # The real implementation, even for a source we have stopped offering:
         # an existing token still works and its owner still expects their data.
         provider = get_sync_provider(tok.provider)
@@ -141,7 +146,12 @@ def _apply(db: Session, user_id, source: str, rec: NormalizedRecord) -> None:
         # The same session reaches us from several sources with a different id
         # each time, so the per-source unique constraint does not catch it. Five
         # copies of one lift meant five times the training load.
-        existing = find_duplicate(db, user_id, p["started_at"], p["ended_at"])
+        existing = db.query(Workout).filter_by(
+            user_id=user_id, source=source, source_record_id=rec.source_record_id
+        ).one_or_none()
+        existing = existing or find_duplicate(
+            db, user_id, p["started_at"], p["ended_at"], p.get("sport")
+        )
         if existing is not None:
             if existing.source == source and existing.source_record_id == rec.source_record_id:
                 return  # Same row we already hold; the constraint would no-op anyway.

@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
+import math
+import re
+from datetime import date, datetime, timedelta, timezone
 
 import anthropic
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, update
+from sqlalchemy.dialects.postgresql import insert
 
 from app.ai.data import gather_recent, user_profile
 from app.ai.prompts import SYSTEM_PROMPT, user_context_block
 from app.config import settings
 from app.dates import today_for
-from app.models import DailyBrief, User
+from app.models import DailyBrief, GenerationBudget, User
+from app.entitlement import can_generate
+from app.ai.validation import BriefPayload
 
 log = logging.getLogger(__name__)
 
@@ -23,8 +29,45 @@ class BriefUnavailable(RuntimeError):
 
 
 def generate_daily_brief(db: Session, user: User, day: date | None = None) -> DailyBrief:
+    target_day = day or today_for(user)
+    if not can_generate(db, user):
+        raise BriefUnavailable("coaching access has expired")
+    existing = db.query(DailyBrief).filter_by(user_id=user.id, day=target_day).one_or_none()
+    if existing is not None:
+        return existing
+    now = datetime.now(timezone.utc)
+    stmt = insert(GenerationBudget).values(
+        user_id=user.id, day=target_day, attempts=1,
+        reserved_until=now + timedelta(minutes=10),
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[GenerationBudget.user_id, GenerationBudget.day],
+        set_={"attempts": GenerationBudget.attempts + 1,
+              "reserved_until": now + timedelta(minutes=10)},
+        where=(GenerationBudget.attempts < 3) & or_(
+            GenerationBudget.reserved_until.is_(None), GenerationBudget.reserved_until < now
+        ),
+    ).returning(GenerationBudget.attempts)
+    reserved = db.execute(stmt).scalar_one_or_none()
+    db.commit()
+    if reserved is None:
+        raise BriefUnavailable("brief generation is in progress or its retry limit was reached")
+    try:
+        # Recheck after acquiring the lease: another worker may have finished
+        # between our first read and the atomic reservation.
+        existing = db.query(DailyBrief).filter_by(user_id=user.id, day=target_day).one_or_none()
+        return existing or _generate(db, user, target_day)
+    finally:
+        db.rollback()
+        db.execute(update(GenerationBudget).where(
+            GenerationBudget.user_id == user.id, GenerationBudget.day == target_day
+        ).values(reserved_until=None))
+        db.commit()
+
+
+def _generate(db: Session, user: User, day: date) -> DailyBrief:
     cfg = settings()
-    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key, timeout=90, max_retries=0)
     snap = gather_recent(db, user, days=14)
     profile = user_profile(user, snap.get("goal"))
     # The athlete's today. On UTC infrastructure date.today() rolls over
@@ -96,10 +139,11 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
         parsed = json.loads(raw)
         if not isinstance(parsed, dict):
             raise ValueError("not an object")
+        parsed = BriefPayload.model_validate(parsed).model_dump()
     except ValueError as e:
         # This runs unattended at 6am, so a bad reply must be visible in the log
         # rather than only in an empty Today tab hours later.
-        log.error("brief: unparseable reply for user %s — %r", user.id, raw[:400])
+        log.error("brief: unusable model reply for user %s", user.id)
         raise BriefUnavailable("the coach did not return a usable brief") from e
 
     brief = (
@@ -157,7 +201,7 @@ def clean_items(raw: object) -> list[dict[str, str]] | None:
             continue
         item_id = str(entry.get("id") or "").strip().lower().replace(" ", "_")
         text = str(entry.get("text") or "").strip()
-        if not item_id or not text or item_id in seen:
+        if not re.fullmatch(r"[a-z0-9_-]{1,64}", item_id) or not text or item_id in seen:
             continue
         seen.add(item_id)
         item: dict[str, object] = {"id": item_id, "text": text[:120]}
@@ -168,7 +212,7 @@ def clean_items(raw: object) -> list[dict[str, str]] | None:
             value = entry.get(field)
             if isinstance(value, bool):
                 continue
-            if isinstance(value, (int, float)) and 1 <= int(value) <= 200:
+            if isinstance(value, (int, float)) and math.isfinite(value) and 1 <= int(value) <= 200:
                 item[field] = int(value)
         out.append(item)
     return out or None

@@ -14,7 +14,7 @@ from app.analytics.dedupe import (
     record_contributor,
 )
 from app.analytics.sleep_repair import combine, clamp_to_window, collapse_nights
-from app.auth.deps import current_user
+from app.consent import require_consent as current_user
 from app.jobs.daily_brief import (
     _MEANINGFUL_MINUTES,
     refresh_after_activity,
@@ -57,6 +57,8 @@ class HKSleep(BaseModel):
     light_s: int | None = None
     rem_s: int | None = None
     awake_s: int | None = None
+    source_device: str | None = Field(default=None, max_length=255)
+    is_snapshot: bool = False
 
 
 class HKHRV(BaseModel):
@@ -83,6 +85,11 @@ class HKBodyMetric(BaseModel):
         "steps",
         "active_energy_kcal",
         "exercise_minutes",
+        "dietary_energy_kcal",
+        "protein_g",
+        "carbs_g",
+        "fat_g",
+        "water_ml",
     ]
     value: float
     measured_at: datetime
@@ -180,6 +187,7 @@ def ingest_healthkit(
                 value=bm.value,
                 measured_at=bm.measured_at,
             ),
+            update_fields=("value",),
         ),
     )
     db.commit()
@@ -189,7 +197,9 @@ def ingest_healthkit(
     # opens the app at 8am from reading a day built on the wrong night.
     # A workout long enough to matter makes the morning's headline wrong: it
     # still says "get your run in" to someone who ran at lunchtime.
-    if any((w.duration_s or 0) >= _MEANINGFUL_MINUTES * 60 for w in batch.workouts):
+    if written.workouts and any(
+        (w.duration_s or 0) >= _MEANINGFUL_MINUTES * 60 for w in batch.workouts
+    ):
         try:
             refresh_after_activity(db, user)
         except Exception:
@@ -219,7 +229,10 @@ def _ingest_workouts(db: Session, user: User, incoming, src: str) -> int:
     """
     written = 0
     for w in sorted(incoming, key=lambda x: x.started_at):
-        existing = find_duplicate(db, user.id, w.started_at, w.ended_at)
+        existing = db.query(Workout).filter_by(
+            user_id=user.id, source=src, source_record_id=w.source_record_id
+        ).one_or_none()
+        existing = existing or find_duplicate(db, user.id, w.started_at, w.ended_at, w.sport)
         if existing is not None:
             if existing.source == src and existing.source_record_id == w.source_record_id:
                 # Genuinely the same row; refresh the fields that can change.
@@ -279,6 +292,7 @@ def _ingest_sleep(db: Session, user: User, incoming, src: str) -> int:
             user_id=user.id,
             source=src,
             source_record_id=s.source_record_id,
+            source_device=s.source_device,
             started_at=s.started_at,
             ended_at=s.ended_at,
             deep_s=s.deep_s,
@@ -286,7 +300,35 @@ def _ingest_sleep(db: Session, user: User, incoming, src: str) -> int:
             rem_s=s.rem_s,
             awake_s=s.awake_s,
         )
-        existing = _overlapping_night(db, user, src, s.started_at, s.ended_at)
+        if s.is_snapshot and s.source_device:
+            # A complete night for one HealthKit writer replaces its older
+            # snapshot. Stage totals cannot be reconstructed from overlapping
+            # aggregate deltas; the device re-reads the complete affected night.
+            matches = db.query(SleepSession).filter(
+                SleepSession.user_id == user.id, SleepSession.source == src,
+                ((SleepSession.started_at < s.ended_at)
+                 & (SleepSession.ended_at > s.started_at))
+                | (SleepSession.source_record_id == s.source_record_id),
+                (SleepSession.source_device == s.source_device)
+                | SleepSession.source_device.is_(None),
+            ).all()
+            existing = next((r for r in matches if r.source_record_id == s.source_record_id), None)
+            for old in matches:
+                if old is not existing:
+                    db.delete(old)
+            db.flush()
+            if existing is not None:
+                for name in ("started_at", "ended_at", "deep_s", "light_s", "rem_s", "awake_s", "source_device"):
+                    setattr(existing, name, getattr(candidate, name))
+                clamp_to_window(existing)
+            else:
+                db.add(candidate)
+                db.flush()
+                clamp_to_window(candidate)
+                written += 1
+            continue
+
+        existing = _overlapping_night(db, user, src, s.started_at, s.ended_at, s.source_device)
         if existing is not None:
             how = (
                 "overlapping"
@@ -313,7 +355,7 @@ def _ingest_sleep(db: Session, user: User, incoming, src: str) -> int:
     return written
 
 
-def _overlapping_night(db: Session, user: User, src: str, start, end):
+def _overlapping_night(db: Session, user: User, src: str, start, end, device=None):
     """A night from the same source that this one continues or restates."""
     window = timedelta(minutes=90)
     return (
@@ -321,6 +363,7 @@ def _overlapping_night(db: Session, user: User, src: str, start, end):
         .filter(
             SleepSession.user_id == user.id,
             SleepSession.source == src,
+            SleepSession.source_device == device,
             SleepSession.started_at <= end + window,
             SleepSession.ended_at >= start - window,
         )
@@ -329,7 +372,8 @@ def _overlapping_night(db: Session, user: User, src: str, start, end):
     )
 
 
-def _upsert(db: Session, model, constraint: str, key, items: list, to_row) -> int:
+def _upsert(db: Session, model, constraint: str, key, items: list, to_row,
+            update_fields: tuple[str, ...] = ()) -> int:
     """Insert `items`, skipping anything already stored. Returns rows written.
 
     Two kinds of duplicate have to be handled, and only one of them is the
@@ -346,10 +390,16 @@ def _upsert(db: Session, model, constraint: str, key, items: list, to_row) -> in
     if not items:
         return 0
     deduped = {key(item): to_row(item) for item in items}
-    stmt = (
-        pg_insert(model)
-        .values(list(deduped.values()))
-        .on_conflict_do_nothing(constraint=constraint)
-        .returning(model.id)
-    )
+    stmt = pg_insert(model).values(list(deduped.values()))
+    if update_fields:
+        from sqlalchemy import or_
+        stmt = stmt.on_conflict_do_update(
+            constraint=constraint,
+            set_={field: getattr(stmt.excluded, field) for field in update_fields},
+            where=or_(*(getattr(model, field).is_distinct_from(getattr(stmt.excluded, field))
+                        for field in update_fields)),
+        )
+    else:
+        stmt = stmt.on_conflict_do_nothing(constraint=constraint)
+    stmt = stmt.returning(model.id)
     return len(db.execute(stmt).scalars().all())
