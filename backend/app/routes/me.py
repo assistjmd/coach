@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.auth.deps import current_user
-from app.consent import CURRENT_LEGAL_VERSION, MINIMUM_AGE
+from app.consent import CURRENT_LEGAL_VERSION, MINIMUM_AGE, has_consent
 from app.dates import today_for
 from app.db import get_db
 from app.models import LegalConsent, OAuthToken, User
@@ -239,7 +239,10 @@ def consent_status(
         current_version=CURRENT_LEGAL_VERSION,
         accepted_version=latest.version if latest else None,
         accepted_at=latest.accepted_at if latest else None,
-        up_to_date=bool(latest and latest.version == CURRENT_LEGAL_VERSION),
+        # Exactly what require_consent enforces, including the birth date. When
+        # these two disagree the app waves someone through the consent screen
+        # and every other endpoint then refuses them, with no way back.
+        up_to_date=has_consent(db, user),
     )
 
 

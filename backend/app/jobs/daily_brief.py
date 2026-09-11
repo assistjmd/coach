@@ -187,14 +187,44 @@ def regenerate_if_sleep_landed(db, user: User) -> bool:
     if not last_night_arrived(db, user):
         return False
 
-    # Late sleep can update readiness, but must never replace exercises or
-    # strand ticks/weights, even if the athlete has not opened the sheet yet.
-    if not refresh_after_activity(db, user):
+    # The point of this path is that a plan written without last night's sleep
+    # should be replaced by one that had it. That stays true right up until the
+    # athlete starts the session — after which rewriting it strands ticks and
+    # logged weights against exercises that no longer exist, which is the bug
+    # that hit someone mid-set in a gym.
+    if _session_untouched(db, user, day, brief):
+        try:
+            generate_daily_brief(db, user, day=day, force=True)
+        except Exception:
+            log.exception("overnight rewrite failed for user %s", user.id)
+            return False
+    elif not refresh_after_activity(db, user):
         return False
+    db.refresh(brief)
     brief.had_overnight_sleep = True
     db.commit()
     log.info("brief regenerated with last night's sleep for user %s (%s)", user.id, day)
     return True
+
+
+def _session_untouched(db, user: User, day, brief) -> bool:
+    """Whether the athlete has engaged with today's session yet.
+
+    A tick, a logged weight, or a session they talked Will into changing all
+    mean the plan in front of them is one they have acted on.
+    """
+    from app.models import DayLog
+
+    if brief.adjusted_at is not None:
+        return False
+    log_row = (
+        db.query(DayLog)
+        .filter(DayLog.user_id == user.id, DayLog.day == day)
+        .one_or_none()
+    )
+    if log_row is None:
+        return True
+    return not (log_row.completed_items or log_row.item_actuals)
 
 
 def run_for_user(user_id: uuid.UUID) -> None:

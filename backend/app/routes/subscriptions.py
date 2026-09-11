@@ -143,8 +143,8 @@ async def apple_notifications(request: Request, db: Session = Depends(get_db)) -
     )
     if sub is None:
         try:
-            owner = db.get(User, uuid.UUID(tx.app_account_token or ""))
-        except ValueError:
+            owner = db.get(User, uuid.UUID(str(tx.app_account_token)))
+        except (ValueError, AttributeError, TypeError):
             owner = None
         if owner is not None:
             _upsert(db, owner.id, tx)
@@ -159,12 +159,27 @@ async def apple_notifications(request: Request, db: Session = Depends(get_db)) -
         return {"ok": True, "note": "unknown subscription"}
 
     if tx.environment != sub.environment or (
-        tx.app_account_token and tx.app_account_token != str(sub.user_id)
+        tx.app_account_token and not _same_account(tx.app_account_token, sub.user_id)
     ):
         raise HTTPException(409, "notification does not match the subscription account")
     _apply(sub, tx, notification.notification_type)
     db.commit()
     return {"ok": True}
+
+
+def _same_account(token: str | None, user_id) -> bool:
+    """Whether Apple's signed account token names this Coach account.
+
+    Compared as UUIDs rather than strings. Swift renders a UUID in upper case
+    and Python in lower, so `str(user_id) == token` rejects a purchase the
+    athlete legitimately made from their own phone.
+    """
+    if not token:
+        return False
+    try:
+        return uuid.UUID(str(token)) == uuid.UUID(str(user_id))
+    except (ValueError, AttributeError, TypeError):
+        return False
 
 
 def _upsert(db: Session, user_id, tx) -> Subscription:
@@ -181,7 +196,7 @@ def _upsert(db: Session, user_id, tx) -> Subscription:
     if sub is None:
         # Apple's signature must bind a new purchase to this Coach account.
         # Knowing someone else's valid JWS is not proof of owning their account.
-        if tx.app_account_token != str(user_id):
+        if not _same_account(tx.app_account_token, user_id):
             raise HTTPException(409, "this purchase is not linked to this account")
         sub = Subscription(
             user_id=user_id, original_transaction_id=tx.original_transaction_id
@@ -189,7 +204,7 @@ def _upsert(db: Session, user_id, tx) -> Subscription:
         db.add(sub)
     elif sub.user_id != user_id:
         raise HTTPException(409, "this purchase belongs to another account; sign in to restore it")
-    elif tx.app_account_token and tx.app_account_token != str(user_id):
+    elif tx.app_account_token and not _same_account(tx.app_account_token, user_id):
         raise HTTPException(409, "this purchase is not linked to this account")
 
     _apply(sub, tx, None)

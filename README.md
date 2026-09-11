@@ -117,12 +117,14 @@ path — `fly.toml` and `Dockerfile` live in `backend/`, and the image is built
 remotely so Docker isn't needed locally. Production is the app `jd-coach-api`
 with the database `jd-coach-db`, region `ord`.
 
-**Migrations do not run on deploy.** That is deliberate — a bad migration
-shouldn't arrive with a routine code push:
+Migrations run as part of the deploy: `fly.toml` declares
+`release_command = "alembic upgrade head"`, which executes in a one-off machine
+with database access before the new version takes traffic, so a failed migration
+aborts the deploy rather than leaving the app pointed at a schema it does not
+match.
 
 ```sh
 cd backend && fly deploy --now
-fly ssh console -C "alembic upgrade head"
 ```
 
 Secrets live in `fly secrets` and nowhere else. `PUBLIC_BASE_URL` must match the
@@ -137,11 +139,11 @@ background-delivery entitlements are declared in `ios/App/App.entitlements`.
 ## Tests
 
 ```sh
-cd backend && .venv/bin/pytest tests/ -q      # 441 of them, all should pass
+cd backend && .venv/bin/pytest tests/ -q      # 479 of them, all should pass
 ```
 
 Runs against the `coach_test` database; SQLite is not an option, since the
-schema and several queries are Postgres-specific. The 41 files under `tests/`
+schema and several queries are Postgres-specific. The 43 files under `tests/`
 are named after the bug or invariant they defend rather than after the module.
 
 There is a dev-only `mock` provider that serves its own consent screen at

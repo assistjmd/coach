@@ -144,10 +144,26 @@ def verify_notification(signed: str) -> AppleNotification:
             log.warning("could not decode renewal info; keeping transaction values")
 
     return AppleNotification(
-        notification_type=getattr(getattr(payload, "notificationType", None), "value", ""),
-        subtype=getattr(getattr(payload, "subtype", None), "value", None),
+        notification_type=_enum_or_raw(payload, "notificationType") or "",
+        subtype=_enum_or_raw(payload, "subtype"),
         transaction=tx,
     )
+
+
+def _enum_or_raw(payload, field: str) -> str | None:
+    """The wire value of an Apple enum field.
+
+    `str(SomeEnum.REFUND)` is "NotificationTypeV2.REFUND", which matched none of
+    the types we act on — refunds were signed, decoded, and then ignored. The
+    library also leaves `notificationType` as None for any type this version
+    predates, parking the string in `rawNotificationType`, so a new kind of
+    revocation must not silently become "".
+    """
+    value = getattr(getattr(payload, field, None), "value", None)
+    if value:
+        return str(value)
+    raw = getattr(payload, f"raw{field[0].upper()}{field[1:]}", None)
+    return str(raw) if raw else None
 
 
 def _to_transaction(payload) -> AppleTransaction:

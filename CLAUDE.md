@@ -13,12 +13,13 @@ that.
 ## Working here
 
 ```bash
-# tests — 399 of them, all should pass
+# tests — 479 of them, all should pass
 cd backend && source .venv/bin/activate && python -m pytest tests/ -q
 
-# deploy backend (migrations are NOT automatic)
+# deploy backend — fly.toml has release_command = "alembic upgrade head",
+# so migrations run in a one-off machine before the new version takes traffic.
+# A failed migration aborts the deploy instead of leaving a mismatched schema.
 cd backend && fly deploy --now
-fly ssh console -C "alembic upgrade head"
 
 # iOS build
 cd ios && xcodegen generate && xcodebuild -project Coach.xcodeproj \

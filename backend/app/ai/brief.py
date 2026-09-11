@@ -28,12 +28,21 @@ class BriefUnavailable(RuntimeError):
     """The model did not return a usable brief."""
 
 
-def generate_daily_brief(db: Session, user: User, day: date | None = None) -> DailyBrief:
+def generate_daily_brief(
+    db: Session, user: User, day: date | None = None, force: bool = False
+) -> DailyBrief:
+    """Today's brief, written once.
+
+    `force` rewrites a brief that already exists — the one caller is the
+    overnight path, where a brief written before last night's sleep landed is
+    genuinely worth replacing. It still costs an attempt against the day's
+    ceiling, so a sync loop cannot turn it into unbounded spend.
+    """
     target_day = day or today_for(user)
     if not can_generate(db, user):
         raise BriefUnavailable("coaching access has expired")
     existing = db.query(DailyBrief).filter_by(user_id=user.id, day=target_day).one_or_none()
-    if existing is not None:
+    if existing is not None and not force:
         return existing
     now = datetime.now(timezone.utc)
     stmt = insert(GenerationBudget).values(
@@ -55,8 +64,13 @@ def generate_daily_brief(db: Session, user: User, day: date | None = None) -> Da
     try:
         # Recheck after acquiring the lease: another worker may have finished
         # between our first read and the atomic reservation.
-        existing = db.query(DailyBrief).filter_by(user_id=user.id, day=target_day).one_or_none()
-        return existing or _generate(db, user, target_day)
+        if not force:
+            existing = db.query(DailyBrief).filter_by(
+                user_id=user.id, day=target_day
+            ).one_or_none()
+            if existing is not None:
+                return existing
+        return _generate(db, user, target_day)
     finally:
         db.rollback()
         db.execute(update(GenerationBudget).where(

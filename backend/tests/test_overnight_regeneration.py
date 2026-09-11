@@ -75,14 +75,35 @@ class TestDetection:
 
 
 class TestRegeneration:
-    def test_a_deadline_brief_is_rewritten_once_the_night_lands(self, db):
+    def test_an_untouched_plan_is_rewritten_once_the_night_lands(self, db):
+        """The whole point of the path: a plan written before the night landed
+        gets replaced by one that had it."""
         user = _user(db)
         _brief(db, user, had_sleep=False)
         _night(db, user)
 
-        with patch("app.ai.headline.refresh_headline", return_value=True) as gen:
+        with patch("app.jobs.daily_brief.generate_daily_brief") as gen:
             assert regenerate_if_sleep_landed(db, user) is True
             assert gen.call_count == 1
+            assert gen.call_args.kwargs["force"] is True
+
+    def test_a_started_session_gets_the_readiness_only(self, db):
+        """Once a tick exists, rewriting the plan would strand it against an
+        exercise that no longer exists — the gym bug."""
+        from app.dates import today_for
+        from app.models import DayLog
+
+        user = _user(db)
+        _brief(db, user, had_sleep=False)
+        _night(db, user)
+        db.add(DayLog(user_id=user.id, day=today_for(user), completed_items=["a"]))
+        db.commit()
+
+        with patch("app.jobs.daily_brief.generate_daily_brief") as full, \
+                patch("app.ai.headline.refresh_headline", return_value=True) as head:
+            assert regenerate_if_sleep_landed(db, user) is True
+            assert full.call_count == 0
+            assert head.call_count == 1
 
     def test_it_never_happens_twice(self, db):
         """A chatty sync must not spend tokens in a loop."""
@@ -90,7 +111,7 @@ class TestRegeneration:
         _brief(db, user, had_sleep=False)
         _night(db, user)
 
-        with patch("app.ai.headline.refresh_headline", return_value=True):
+        with patch("app.jobs.daily_brief.generate_daily_brief"):
             assert regenerate_if_sleep_landed(db, user) is True
             assert regenerate_if_sleep_landed(db, user) is False
             assert regenerate_if_sleep_landed(db, user) is False
@@ -100,14 +121,14 @@ class TestRegeneration:
         _brief(db, user, had_sleep=True)
         _night(db, user)
 
-        with patch("app.ai.headline.refresh_headline", return_value=True) as gen:
+        with patch("app.jobs.daily_brief.generate_daily_brief") as gen:
             assert regenerate_if_sleep_landed(db, user) is False
             assert gen.call_count == 0
 
     def test_nothing_happens_without_a_brief(self, db):
         user = _user(db)
         _night(db, user)
-        with patch("app.ai.headline.refresh_headline", return_value=True) as gen:
+        with patch("app.jobs.daily_brief.generate_daily_brief") as gen:
             assert regenerate_if_sleep_landed(db, user) is False
             assert gen.call_count == 0
 
