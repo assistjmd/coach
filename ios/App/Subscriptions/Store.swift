@@ -138,21 +138,55 @@ final class Store: ObservableObject {
     ///
     /// Required by App Store review for anything selling a subscription, and
     /// genuinely needed: the entitlement belongs to the Apple ID, not the phone.
+    /// Restore a subscription bought on this Apple ID.
+    ///
+    /// `Transaction.currentEntitlements` is tried first and always: StoreKit
+    /// keeps it on the device, so it needs no password and no network, and it
+    /// answers almost every real restore. `AppStore.sync()` is the heavyweight
+    /// path — it puts up an App Store sign-in sheet — and it is only worth
+    /// reaching for when the device genuinely knows of nothing.
+    ///
+    /// It used to run first, and a throw returned early. Cancelling that
+    /// password sheet throws, so tapping Restore and dismissing the prompt
+    /// reported "Couldn't reach the App Store" without ever looking at the
+    /// entitlements sitting on the phone.
     func restore() async {
         purchasing = true
         defer { purchasing = false }
-        do { try await AppStore.sync() }
-        catch {
+        error = nil
+
+        if await claimEntitlements() {
+            await loadStatus()
+            if state == "subscribed" { return }
+        }
+
+        // Nothing on the device. Ask Apple directly.
+        do {
+            try await AppStore.sync()
+        } catch let storeError as StoreKitError {
+            if case .userCancelled = storeError { return }
+            error = "Couldn't reach the App Store. Try restoring again."
+            return
+        } catch {
             self.error = "Couldn't reach the App Store. Try restoring again."
             return
         }
-        for await result in Transaction.currentEntitlements {
-            await handle(result)
-        }
+
+        _ = await claimEntitlements()
         await loadStatus()
         if state != "subscribed" {
             error = "No subscription found on this Apple ID."
         }
+    }
+
+    /// Sends every entitlement the device holds. Returns whether there was one.
+    private func claimEntitlements() async -> Bool {
+        var found = false
+        for await result in Transaction.currentEntitlements {
+            found = true
+            await handle(result)
+        }
+        return found
     }
 
     private func handle(_ result: VerificationResult<Transaction>) async {
@@ -183,6 +217,12 @@ final class Store: ObservableObject {
             trialDaysLeft = s.trialDaysLeft
             pitch = s.pitch
             return true
+        } catch APIError.http(let code, let detail) where (400..<500).contains(code) {
+            // The server verified the signature and still said no. Retrying
+            // cannot change that, so say what it said rather than sending them
+            // round the refresh loop again.
+            self.error = detail
+            return false
         } catch {
             self.error = "Purchase went through, but I couldn't confirm it. "
                 + "Pull to refresh in a moment."
