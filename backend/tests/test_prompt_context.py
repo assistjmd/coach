@@ -64,15 +64,18 @@ class TestAbsentDataIsAbsent:
             assert snap.get(key) != [], f"{key} is present but empty"
 
     def test_sections_with_data_survive(self, db, user):
-        from datetime import datetime, timezone
+        from datetime import datetime, timedelta, timezone
 
         from app.ai.data import gather_recent
         from app.models import Workout
 
+        # Relative to now: `gather_recent` windows back from the real clock, so
+        # a fixed date eventually falls outside it and the section goes missing
+        # for a reason that has nothing to do with the behaviour under test.
+        started = datetime.now(timezone.utc) - timedelta(days=3)
         db.add(Workout(
             user_id=user.id, source="healthkit", source_record_id="w1",
-            started_at=datetime(2026, 8, 25, 12, tzinfo=timezone.utc),
-            ended_at=datetime(2026, 8, 25, 13, tzinfo=timezone.utc),
+            started_at=started, ended_at=started + timedelta(hours=1),
             duration_s=3600, sport="running", avg_hr=150,
         ))
         db.commit()

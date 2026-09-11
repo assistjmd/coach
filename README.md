@@ -1,15 +1,28 @@
-# coach
+# Coach Will
 
-Multi-tracker fitness aggregator with an AI coach. Pulls workouts, sleep, HRV, and recovery data from Apple HealthKit, Oura (and later Strava, Whoop, Garmin, TrainingPeaks, Wahoo Elemnt) into a unified model. Claude generates daily readiness briefs, training prescriptions, and answers questions over the user's own data.
+An iOS training coach. It pulls workouts, sleep, HRV and recovery data into one
+model, then each morning prescribes **one specific session** with a readiness
+read. The product bet is that it makes a call rather than showing a dashboard.
+
+This file is setup: how to get the backend and the app running on a fresh
+machine. **[`CLAUDE.md`](CLAUDE.md) is the orientation doc** — architecture, the
+rules that came out of real shipped bugs, and what is still open. Read that one
+first if you are here to change something rather than to build it.
 
 ## Status
 
-Working end to end in local dev: sign in with Apple, connect a provider over
-OAuth, sync data, and get a Claude-generated daily brief.
+In TestFlight, with 1.0 staged for App Store review. Free to download; the
+subscription is $12.99/mo or $99/yr after a 14-day server-side trial.
 
-Providers implemented: **Oura** (OAuth) and **Apple Health** (device push).
-Strava and Whoop are next. Goal capture currently lives in the Profile tab;
-moving it into onboarding is in progress.
+Providers implemented: **Apple Health** (device push), **Oura**, **Strava**,
+**Wahoo**, **Google Health** — all OAuth except Apple Health.
+
+Which of them are *offered* is a separate question from which are built.
+`DIRECT_PROVIDERS` is the allowlist, and it is empty at launch: Strava caps an
+unreviewed app at 10 connected athletes and Oura at 10 users, so a public
+Connect button would 403 the eleventh person to install. Everything else appears
+as an announced row that routes through Apple Health, which nearly every device
+writes to anyway. Existing connections keep syncing regardless of the list.
 
 ## Layout
 
@@ -46,9 +59,16 @@ python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().
 `ANTHROPIC_API_KEY` is needed for briefs and chat. Note that a Claude subscription
 and API credits are billed separately — the key needs credit on it.
 
-`OURA_REDIRECT_URI` should be left **blank**; it derives from `PUBLIC_BASE_URL`.
-Register `http://localhost:8000/v1/providers/oura/callback` as the callback on
-your Oura app at <https://cloud.ouraring.com/oauth/applications>.
+Provider credentials are optional for local work — an empty `DIRECT_PROVIDERS`
+offers Apple Health only, which is the production setting too. To exercise a
+real OAuth flow, leave `<SLUG>_REDIRECT_URI` **blank** so it derives from
+`PUBLIC_BASE_URL`, and register `http://localhost:8000/v1/providers/<slug>/callback`
+as the callback with the provider. For Oura that is
+<https://cloud.ouraring.com/oauth/applications>.
+
+`.env.example` lists every setting `app/config.py` reads, with comments. A
+setting missing from it is one someone discovers later as a runtime failure with
+no obvious cause, so keep the two in step.
 
 ## Quickstart (iOS)
 
@@ -80,7 +100,7 @@ build time and read by `APIClient`. To override without editing a tracked file,
 create `App/Config.local.xcconfig` (gitignored):
 
 ```
-COACH_API_BASE_URL = https:/$()/coach-backend.fly.dev
+COACH_API_BASE_URL = https:/$()/jd-coach-api.fly.dev
 ```
 
 The `$()` expands to nothing; it exists only because xcconfig would otherwise
@@ -94,30 +114,49 @@ qualify; a plain `http://` LAN address does not.
 
 See [`backend/deploy/README.md`](backend/deploy/README.md). Fly is the supported
 path — `fly.toml` and `Dockerfile` live in `backend/`, and the image is built
-remotely so Docker isn't needed locally.
+remotely so Docker isn't needed locally. Production is the app `jd-coach-api`
+with the database `jd-coach-db`, region `ord`.
 
-`PUBLIC_BASE_URL` must match the deployed hostname: the OAuth callback derives
-from it, and providers compare redirect URIs as exact strings.
+**Migrations do not run on deploy.** That is deliberate — a bad migration
+shouldn't arrive with a routine code push:
 
-Google Sign-In is not wired into the UI yet; when it is, it will need a
-`GoogleService-Info.plist`. The HealthKit + background-delivery entitlements are
-declared in `ios/App/App.entitlements`.
+```sh
+cd backend && fly deploy --now
+fly ssh console -C "alembic upgrade head"
+```
+
+Secrets live in `fly secrets` and nowhere else. `PUBLIC_BASE_URL` must match the
+deployed hostname: the OAuth callback derives from it, and providers compare
+redirect URIs as exact strings.
+
+Sign in with Apple is the only sign-in in the app. The backend also verifies
+Google tokens (`app/auth/google.py`), but no Google button is wired into the UI;
+adding one needs a `GoogleService-Info.plist`. The HealthKit and
+background-delivery entitlements are declared in `ios/App/App.entitlements`.
 
 ## Tests
 
 ```sh
-cd backend && .venv/bin/pytest
+cd backend && .venv/bin/pytest tests/ -q      # 441 of them, all should pass
 ```
 
-Runs against the `coach_test` database. There is a dev-only `mock` provider that
-serves its own consent screen at `/v1/dev/fake-consent`, so the whole OAuth
-connect flow can be exercised without a registered third-party app.
+Runs against the `coach_test` database; SQLite is not an option, since the
+schema and several queries are Postgres-specific. The 41 files under `tests/`
+are named after the bug or invariant they defend rather than after the module.
+
+There is a dev-only `mock` provider that serves its own consent screen at
+`/v1/dev/fake-consent`, so the whole OAuth connect flow can be exercised without
+a registered third-party app.
 
 ## Adding a new provider
 
 1. Create `backend/app/providers/<slug>.py` implementing the `Provider` protocol from `providers/base.py`.
 2. Register it in `backend/app/providers/registry.py`.
-3. Add OAuth credentials to env: `<SLUG>_CLIENT_ID`, `<SLUG>_CLIENT_SECRET`.
-4. iOS Connections screen auto-renders new tiles from the `providers` list in `GET /v1/me`.
+3. Add OAuth credentials to env: `<SLUG>_CLIENT_ID`, `<SLUG>_CLIENT_SECRET`, and document both in `.env.example`.
+4. Add the slug to `DIRECT_PROVIDERS` to offer it. Until then it renders as an announced row.
+5. iOS Connections screen auto-renders new rows from the `providers` list in `GET /v1/me`.
 
-No core changes required.
+No core changes required. One thing to keep straight while you are in
+`registry.py`: `get_provider` governs what is *offered*, `get_sync_provider`
+moves data for tokens that already exist. Conflating the two closed new
+connections and broke every live one for a day.

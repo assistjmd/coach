@@ -163,14 +163,15 @@ class TestOutageIsVisible:
     found out because they noticed their own workout had not appeared."""
 
     def test_everyone_missing_is_flagged_as_an_outage(self, db, user):
-        from datetime import datetime, timezone
+        from datetime import datetime, timedelta, timezone
 
         from app.models import Workout
 
+        # `collect` counts back from now, so the fixture has to as well.
+        started = datetime.now(timezone.utc) - timedelta(days=2)
         db.add(Workout(
             user_id=user.id, source="healthkit", source_record_id="w1",
-            started_at=datetime(2026, 9, 5, 12, tzinfo=timezone.utc),
-            ended_at=datetime(2026, 9, 5, 13, tzinfo=timezone.utc),
+            started_at=started, ended_at=started + timedelta(hours=1),
             duration_s=3600, sport="running",
         ))
         db.commit()
@@ -180,15 +181,15 @@ class TestOutageIsVisible:
         assert gap["all_missing"] is True
 
     def test_a_written_brief_clears_it(self, db, user):
-        from datetime import datetime, timezone
+        from datetime import datetime, timedelta, timezone
 
         from app.dates import today_for
         from app.models import Workout
 
+        started = datetime.now(timezone.utc) - timedelta(days=2)
         db.add(Workout(
             user_id=user.id, source="healthkit", source_record_id="w1",
-            started_at=datetime(2026, 9, 5, 12, tzinfo=timezone.utc),
-            ended_at=datetime(2026, 9, 5, 13, tzinfo=timezone.utc),
+            started_at=started, ended_at=started + timedelta(hours=1),
             duration_s=3600, sport="running",
         ))
         db.add(DailyBrief(
