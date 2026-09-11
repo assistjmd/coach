@@ -4,8 +4,8 @@ An iOS training coach. It pulls workouts, sleep, HRV and recovery data into one
 model, then each morning prescribes **one specific session** with a readiness
 read. The product bet is that it makes a call rather than showing a dashboard.
 
-This file is setup: how to get the backend and the app running on a fresh
-machine. **[`CLAUDE.md`](CLAUDE.md) is the orientation doc** — architecture, the
+Everything lives on `main`. This file is setup: how to get the backend and the
+app running on a fresh machine. **[`CLAUDE.md`](CLAUDE.md) is the orientation doc** — architecture, the
 rules that came out of real shipped bugs, and what is still open. Read that one
 first if you are here to change something rather than to build it.
 
