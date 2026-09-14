@@ -125,8 +125,21 @@ def can_generate(db: Session, user: User) -> bool:
 
 
 def allowed_environments(user_id) -> tuple[str, ...]:
+    """Which Apple environments may grant this account access.
+
+    A production account gets Production receipts and nothing else, so a
+    sandbox purchase cannot hand out a real subscription. Two exceptions are
+    deliberate: a listed account id, and the wildcard `*`.
+
+    The wildcard exists for App Review. A reviewer installs the build, signs in
+    — creating an account whose id nobody could have listed in advance — and
+    buys with a sandbox Apple ID, because review always transacts in Sandbox.
+    Refusing that is a submission rejected for an in-app purchase that "could
+    not be completed". A public App Store build only ever produces Production
+    receipts, so the wildcard's reach is limited to builds we hand out.
+    """
     cfg = settings()
     testers = {v.strip() for v in cfg.sandbox_subscription_user_ids.split(",") if v.strip()}
-    if cfg.app_env != "prod" or str(user_id) in testers:
+    if cfg.app_env != "prod" or "*" in testers or str(user_id) in testers:
         return ("Production", "Sandbox")
     return ("Production",)
