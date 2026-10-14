@@ -340,22 +340,9 @@ private struct DataStep: View {
                         Text("Sleep, heart rate and HRV, workouts and VO₂ max.")
                             .font(Theme.Font.body)
                             .foregroundStyle(Theme.Palette.textDim)
-                        Text("Read only. Will never writes to Health.")
+                        Text("Read only. Coach Will never writes to Health.")
                             .font(Theme.Font.caption)
                             .foregroundStyle(Theme.Palette.textDim)
-
-                        if health.didRequestAuthorization {
-                            Text("Authorized")
-                                .font(Theme.Font.caption)
-                                .foregroundStyle(Theme.Palette.accent)
-                        } else {
-                            // Pre-permission explainer, because the system sheet
-                            // is one-shot: deny it and the only route back is
-                            // Settings.
-                            ActionButton(title: "Allow access") {
-                                Task { await health.requestAuthorization() }
-                            }
-                        }
                     }
                 }
 
@@ -376,8 +363,16 @@ private struct DataStep: View {
                 }
             }
         } footer: {
-            ActionButton(title: model.isSaving ? "Setting up" : "Start") {
-                Task { await model.complete(session: session) }
+            // App Review 5.1.1(iv): this panel is a pre-permission message, so
+            // its only way forward must lead to the system sheet. No separate
+            // "Allow" button the user could skip past — Continue always asks.
+            ActionButton(title: model.isSaving ? "Setting up" : "Continue") {
+                Task {
+                    if !health.didRequestAuthorization {
+                        await health.requestAuthorization()
+                    }
+                    await model.complete(session: session)
+                }
             }
             .disabled(model.isSaving)
             .opacity(model.isSaving ? 0.6 : 1)
