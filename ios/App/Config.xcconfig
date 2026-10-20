@@ -10,7 +10,11 @@
 // To override without touching this file, create App/Config.local.xcconfig
 // (gitignored) containing your own COACH_API_BASE_URL line.
 
-COACH_API_BASE_URL = http:/$()/localhost:8000
+// Device builds (TestFlight, App Store) default to production, so a fresh
+// clone can never ship a build that points at localhost. Build 39 did exactly
+// that. The simulator keeps localhost.
+COACH_API_BASE_URL = https:/$()/jd-coach-api.fly.dev
+COACH_API_BASE_URL[sdk=iphonesimulator*] = http:/$()/localhost:8000
 
 // Optional include — absent on a fresh clone, present once you make one.
 // Comes last so its value wins.
