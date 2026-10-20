@@ -62,6 +62,15 @@ struct ConsentStep: View {
                                      + "and never write back to Apple Health.")
                                     .font(Theme.Font.body)
                                     .foregroundStyle(Theme.Palette.textDim)
+                                // App Review 5.1.2(i): sharing with a third-party AI
+                                // must be disclosed in the app and agreed to before it
+                                // happens, not only in the privacy policy.
+                                Text("To write your coaching, your health data and "
+                                     + "messages are sent to Anthropic, an AI provider. "
+                                     + "Anthropic processes it for us and doesn't use it "
+                                     + "to train its models.")
+                                    .font(Theme.Font.body)
+                                    .foregroundStyle(Theme.Palette.textDim)
                                 Text("You can delete your account, and everything in "
                                      + "it, at any time from the Goal tab.")
                                     .font(Theme.Font.body)
